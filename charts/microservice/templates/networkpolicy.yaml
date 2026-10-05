@@ -1,0 +1,122 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $np := .Values.networkPolicy }}
+{{- $name := include "microservice.name" . }}
+# Namespace-wide default-deny (ingress+egress) lives in gitops/envs/<env>/platform/base.
+# This policy opens exactly what this service needs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "microservice.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if $np.allowIngressNginx }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: {{ .Values.containerPort }}
+    {{- end }}
+    # Prometheus scraping /metrics
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: {{ .Values.containerPort }}
+    {{- if $np.allowFromAllShopPods }}
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: {{ .Values.global.partOf }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.containerPort }}
+    {{- else if $np.callers }}
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  {{- toYaml $np.callers | nindent 18 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.containerPort }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    {{- if $np.egress.dns }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    # Synchronous calls to other shop services (auth-service always allowed for JWKS)
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  {{- toYaml (uniq (append $np.egressToServices "auth-service")) | nindent 18 }}
+      ports:
+        - protocol: TCP
+          port: 8080
+    {{- $dsPorts := list }}
+    {{- if $np.egress.postgres }}{{ $dsPorts = append $dsPorts 5432 }}{{ end }}
+    {{- if $np.egress.redis }}{{ $dsPorts = append $dsPorts 6379 }}{{ end }}
+    {{- if $np.egress.kafka }}{{ $dsPorts = concat $dsPorts (list 9092 9094 9096) }}{{ end }}
+    {{- if $dsPorts }}
+    - ports:
+        {{- range $dsPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+      {{- with $np.datastorePeers }}
+      to:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- if $np.egress.otlp }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tracing
+      ports:
+        - protocol: TCP
+          port: 4318
+    {{- end }}
+    {{- if $np.egress.https }}
+    # AWS APIs (STS for IRSA, S3, SES, Secrets Manager endpoints), payment gateway
+    - ports:
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,59 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopverse-pods
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: shopverse
+spec:
+  groups:
+    - name: shopverse-pods
+      rules:
+        - alert: PodCrashLooping
+          expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff",namespace=~"shop|data|kafka|ingress-nginx|tracing|logging|monitoring|argocd"}[5m]) >= 1
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) is in CrashLoopBackOff"
+            description: "kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c {{ $labels.container }} --previous"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md
+        - alert: PodOOMKilled
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="shop"}[15m]) > 0
+            and on (namespace, pod, container)
+            kube_pod_container_status_last_terminated_reason{namespace="shop",reason="OOMKilled"} == 1
+          for: 0m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }} was OOMKilled - raise the memory limit or NODE_OPTIONS heap size"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/scaling.md
+        - alert: ImagePullFailing
+          expr: kube_pod_container_status_waiting_reason{namespace="shop",reason=~"ErrImagePull|ImagePullBackOff"} == 1
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.pod }} cannot pull its image (tag not pushed to ECR, or Kyverno blocked an unsigned image?)"
+        - alert: HPAMaxedOut
+          expr: |
+            kube_horizontalpodautoscaler_status_current_replicas{namespace="shop"}
+            >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="shop"}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.horizontalpodautoscaler }} has been at maxReplicas for 15m"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/scaling.md
+        - alert: RolloutAborted
+          expr: rollout_info{namespace="shop",phase="Degraded"} == 1
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "Argo Rollout {{ $labels.name }} is Degraded (canary analysis failed and was aborted)"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/rollback.md
+        - alert: ExternalSecretSyncFailing
+          expr: externalsecret_status_condition{condition="Ready",status="False"} == 1
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} cannot sync from AWS Secrets Manager"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/secret-rotation.md

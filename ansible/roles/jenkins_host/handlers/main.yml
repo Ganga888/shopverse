@@ -1,0 +1,8 @@
+- name: Recreate jenkins stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ jenkins_install_dir }}"
+    project_name: "{{ jenkins_compose_project }}"
+    env_files: [.env, .env.secrets]
+    state: present
+    recreate: always
+    build: always

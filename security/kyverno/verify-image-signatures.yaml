@@ -1,0 +1,99 @@
+# Admission-time supply-chain gate: every ShopVerse image (ECR shopverse/*) must carry a cosign
+# signature made by the AWS KMS key alias/shopverse-cosign (asymmetric ECC_NIST_P256, SIGN_VERIFY).
+# CI signs the image digest after Sonar -> dependency scan -> Trivy -> SBOM (see security/README.md).
+# Kyverno resolves the public key from KMS (kms:GetPublicKey) and pulls signatures from ECR using
+# IRSA role shopverse-<env>-kyverno. The image reference is rewritten to its digest (mutateDigest),
+# so the running pod is pinned to exactly what was verified.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-shopverse-image-signatures
+  annotations:
+    policies.kyverno.io/title: Verify ShopVerse image signatures (cosign + AWS KMS)
+    # Verify at Pod level only: autogen would rewrite Deployment/Rollout images to digests,
+    # which ArgoCD self-heal would revert in a loop.
+    pod-policies.kyverno.io/autogen-controllers: none
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+spec:
+  background: false
+  webhookTimeoutSeconds: 30
+  failurePolicy: Fail
+  rules:
+    - name: verify-cosign-kms-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kyverno]
+      verifyImages:
+        - imageReferences:
+            - "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+          failureAction: Enforce
+          mutateDigest: true
+          verifyDigest: true
+          required: true
+          useCache: true
+          imageRegistryCredentials:
+            providers: [amazon]
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    # Equivalent offline form: `cosign public-key --key awskms:///alias/shopverse-cosign`
+                    # and paste the PEM into `publicKeys:` (then Kyverno needs no KMS permission).
+                    kms: awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign
+                    signatureAlgorithm: sha256
+                    rekor:
+                      ignoreTlog: true
+                    ctlog:
+                      ignoreSCT: true
+---
+# The SBOM (CycloneDX) produced in CI is attached as a signed cosign attestation. Audit only for now:
+# reports images whose SBOM attestation is missing; switch to Enforce once every service publishes one.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-shopverse-sbom-attestation
+  annotations:
+    policies.kyverno.io/title: Verify ShopVerse SBOM attestation
+    pod-policies.kyverno.io/autogen-controllers: none
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+spec:
+  background: false
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-cyclonedx-attestation
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      verifyImages:
+        - imageReferences:
+            - "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+          failureAction: Audit
+          mutateDigest: false
+          verifyDigest: false
+          required: false
+          imageRegistryCredentials:
+            providers: [amazon]
+          attestations:
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keys:
+                        kms: awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign
+                        rekor: { ignoreTlog: true }
+                        ctlog: { ignoreSCT: true }
+              conditions:
+                - all:
+                    - key: "{{ bomFormat }}"
+                      operator: Equals
+                      value: CycloneDX

@@ -1,0 +1,38 @@
+- name: Kernel hardening parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/60-shopverse-hardening.conf
+    reload: true
+    state: present
+  loop: "{{ common_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+
+- name: IP forwarding (1 on container hosts)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "{{ common_ip_forward }}"
+    sysctl_file: /etc/sysctl.d/60-shopverse-hardening.conf
+    reload: true
+    state: present
+
+- name: Disable unused filesystems
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/shopverse-disable-fs.conf
+    content: |
+      {% for fs in common_disabled_filesystems %}
+      install {{ fs }} /bin/false
+      blacklist {{ fs }}
+      {% endfor %}
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Restrict core dumps
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/10-shopverse-core.conf
+    content: "* hard core 0\n"
+    owner: root
+    group: root
+    mode: "0644"

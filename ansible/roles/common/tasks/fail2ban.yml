@@ -1,0 +1,26 @@
+- name: fail2ban jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/shopverse.local
+    content: |
+      [DEFAULT]
+      bantime  = {{ common_fail2ban_bantime }}
+      findtime = {{ common_fail2ban_findtime }}
+      maxretry = {{ common_fail2ban_maxretry }}
+      backend  = systemd
+      banaction = ufw
+      ignoreip = 127.0.0.1/8 ::1 {{ common_ssh_allowed_cidrs | join(' ') }}
+
+      [sshd]
+      enabled = true
+      port    = {{ common_ssh_port }}
+      mode    = aggressive
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: fail2ban enabled
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started

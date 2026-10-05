@@ -1,0 +1,114 @@
+# Jenkins Configuration as Code. Secrets are injected as environment variables (see .env.example);
+# nothing sensitive is stored in this file.
+jenkins:
+  systemMessage: "ShopVerse CI - managed by JCasC (ci/jenkins/casc.yaml). Manual changes will be overwritten."
+  numExecutors: 4
+  mode: NORMAL
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          name: "Platform Admin"
+          password: "${JENKINS_ADMIN_PASSWORD}"
+  authorizationStrategy:
+    globalMatrix:
+      entries:
+        - user:
+            name: "admin"
+            permissions: ["Overall/Administer"]
+        - group:
+            name: "authenticated"
+            permissions: ["Overall/Read", "Job/Read", "Job/Build", "Job/Cancel"]
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: true
+  remotingSecurity:
+    enabled: true
+  globalNodeProperties:
+    - envVars:
+        env:
+          - key: "DOCKER_BUILDKIT"
+            value: "1"
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - aws:
+              id: "aws-jenkins-ci"
+              # Only used when AWS_AUTH_MODE=static-keys (Jenkins outside AWS). On EC2 these stay
+              # empty and the pipeline uses the instance role (terraform/ci).
+              description: "Static keys for a Jenkins outside AWS (unused on EC2)"
+              accessKey: "${AWS_CI_ACCESS_KEY_ID:-}"
+              secretKey: "${AWS_CI_SECRET_ACCESS_KEY:-}"
+              scope: GLOBAL
+          - string:
+              id: "aws-account-id"
+              description: "AWS account ID for the ECR registry"
+              secret: "${AWS_ACCOUNT_ID}"
+              scope: GLOBAL
+          - string:
+              id: "sonarqube-token"
+              description: "SonarQube analysis token"
+              secret: "${SONAR_TOKEN}"
+              scope: GLOBAL
+          - usernamePassword:
+              id: "github-token"
+              description: "GitHub token for checkout and the GitOps image-tag push"
+              username: "${GITHUB_USER}"
+              password: "${GITHUB_TOKEN}"
+              scope: GLOBAL
+
+unclassified:
+  location:
+    url: "${JENKINS_URL:-http://localhost:8085/}"
+    adminAddress: "platform-team@ganga888.in"
+  sonarGlobalConfiguration:
+    buildWrapperEnabled: true
+    installations:
+      - name: "sonarqube"
+        serverUrl: "http://sonarqube:9000"
+        credentialsId: "sonarqube-token"
+        webhookSecretId: ""
+  timestamper:
+    allPipelines: true
+
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+
+jobs:
+  - script: >
+      multibranchPipelineJob('shopverse') {
+        displayName('ShopVerse monorepo')
+        branchSources {
+          branchSource {
+            source {
+              github {
+                id('shopverse-github')
+                repoOwner('${GITHUB_OWNER}')
+                repository('${GITHUB_REPO}')
+                repositoryUrl('https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}.git')
+                configuredByUrl(true)
+                credentialsId('github-token')
+                traits {
+                  gitHubBranchDiscovery { strategyId(1) }
+                  gitHubPullRequestDiscovery { strategyId(1) }
+                }
+              }
+            }
+          }
+        }
+        factory {
+          workflowBranchProjectFactory { scriptPath('ci/Jenkinsfile') }
+        }
+        orphanedItemStrategy {
+          discardOldItems { numToKeep(10) }
+        }
+        triggers {
+          periodicFolderTrigger { interval('5m') }
+        }
+      }

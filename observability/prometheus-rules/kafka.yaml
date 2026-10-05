@@ -1,0 +1,58 @@
+# Kafka consumer health. kafka_consumergroup_lag comes from Strimzi kafka-exporter (dev) or
+# prometheus-kafka-exporter against MSK (staging/prod).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopverse-kafka
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: shopverse
+spec:
+  groups:
+    - name: shopverse-kafka
+      rules:
+        - record: shopverse:kafka_consumergroup_lag:sum
+          expr: sum by (consumergroup, topic) (kafka_consumergroup_lag)
+        - alert: KafkaConsumerLagHigh
+          expr: shopverse:kafka_consumergroup_lag:sum > 1000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consumer group {{ $labels.consumergroup }} lags {{ $value }} messages on {{ $labels.topic }}"
+            description: "KEDA should be scaling it out; check keda_scaler_errors_total and the ScaledObject maxReplicaCount."
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/scaling.md
+        - alert: KafkaConsumerLagCritical
+          expr: shopverse:kafka_consumergroup_lag:sum{topic=~"orders.events|payments.commands|payments.events|inventory.commands|inventory.events"} > 5000
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Saga topic {{ $labels.topic }} backlog {{ $value }} for {{ $labels.consumergroup }} - orders will time out (5 min saga timeout)"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md
+        - alert: KafkaConsumerLagGrowing
+          expr: |
+            deriv(shopverse:kafka_consumergroup_lag:sum[15m]) > 5
+            and shopverse:kafka_consumergroup_lag:sum > 200
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lag of {{ $labels.consumergroup }} on {{ $labels.topic }} keeps growing"
+        - alert: KafkaDeadLetterMessages
+          expr: sum by (topic) (increase(kafka_topic_partition_current_offset{topic=~".*\\.dlq"}[15m])) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $value }} new message(s) in dead-letter topic {{ $labels.topic }}"
+            description: "Inspect payloads, fix the consumer, then replay from the DLQ."
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md
+        - alert: KafkaExporterDown
+          expr: absent(kafka_consumergroup_lag)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No Kafka consumer-lag metrics for 15m (kafka-exporter down or brokers unreachable)"

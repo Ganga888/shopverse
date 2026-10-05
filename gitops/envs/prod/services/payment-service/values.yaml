@@ -1,0 +1,96 @@
+# payment-service (prod) - values for charts/microservice. Release name == payment-service, namespace shop.
+# image.tag is bumped by the promote workflow (.github) - do not edit by hand outside a PR.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+# Kafka: MSK SASL/SCRAM on 9096; brokers + credentials come from Secrets Manager (AmazonMSK_shopverse_prod_app).
+global:
+  env: prod
+  domain: ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/payment-service
+  tag: bootstrap
+replicaCount: 3
+logLevel: info
+nodeEnv: production
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+ingress:
+  enabled: true
+  path: /api/v1/payments
+serviceAccount:
+  irsa:
+    enabled: false
+env:
+  NODE_OPTIONS: --max-old-space-size=384
+  DB_SSL: 'true'
+  KAFKA_SSL: 'true'
+  KAFKA_CLIENT_ID: payment-service
+  KAFKA_GROUP_ID: payment-service
+  PAYMENT_GATEWAY_MODE: live
+  KAFKA_SASL_MECHANISM: scram-sha-512
+externalSecrets:
+  items:
+  - name: db
+    remoteKey: shopverse/prod/rds/payment-service
+    keys:
+      DB_HOST: host
+      DB_PORT: port
+      DB_NAME: dbname
+      DB_USER: username
+      DB_PASSWORD: password
+  - name: gateway
+    remoteKey: shopverse/prod/payment/gateway
+    keys:
+      PAYMENT_GATEWAY_API_KEY: api_key
+  - name: kafka
+    remoteKey: AmazonMSK_shopverse_prod_app
+    keys:
+      KAFKA_BROKERS: brokers
+      KAFKA_SASL_USERNAME: username
+      KAFKA_SASL_PASSWORD: password
+  enabled: true
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+topologySpread:
+  zoneWhenUnsatisfiable: DoNotSchedule
+prometheusRule:
+  severity: critical
+networkPolicy:
+  callers: []
+  egressToServices: []
+  egress:
+    postgres: true
+    redis: false
+    kafka: true
+migration:
+  enabled: true
+keda:
+  enabled: true
+  minReplicaCount: 3
+  maxReplicaCount: 20
+  consumerGroup: payment-service
+  topics:
+  - payments.commands
+  lagThreshold: '100'
+  tls: true
+  bootstrapServersFromEnv: true
+  sasl: scram_sha512
+  saslSecretItem: kafka
+rollout:
+  enabled: true
+  trafficRouting: nginx
+  analysis:
+    successRateThreshold: 0.99
+    p95LatencyThreshold: 1.0

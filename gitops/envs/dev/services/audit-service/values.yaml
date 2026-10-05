@@ -1,0 +1,89 @@
+# audit-service (dev) - values for charts/microservice. Release name == audit-service, namespace shop.
+# image.tag is bumped by Jenkins (ci/Jenkinsfile) after every main-branch build.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+global:
+  env: dev
+  domain: dev.ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/audit-service
+  tag: bootstrap
+replicaCount: 2
+logLevel: debug
+nodeEnv: production
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+ingress:
+  enabled: true
+  path: /api/v1/audit
+serviceAccount:
+  irsa:
+    enabled: true
+    roleArn: arn:aws:iam::111122223333:role/shopverse-dev-audit-service
+env:
+  NODE_OPTIONS: --max-old-space-size=192
+  DB_HOST: postgresql.data.svc.cluster.local
+  DB_PORT: '5432'
+  DB_NAME: audit
+  DB_SSL: 'false'
+  KAFKA_BROKERS: shopverse-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+  KAFKA_SSL: 'false'
+  KAFKA_CLIENT_ID: audit-service
+  KAFKA_GROUP_ID: audit-service
+  S3_BUCKET: shopverse-dev-audit
+externalSecrets:
+  items:
+  - name: db
+    remoteKey: shopverse/dev/rds/audit-service
+    keys:
+      DB_USER: username
+      DB_PASSWORD: password
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpread:
+  zoneWhenUnsatisfiable: ScheduleAnyway
+prometheusRule:
+  severity: warning
+networkPolicy:
+  callers: []
+  egressToServices: []
+  egress:
+    postgres: true
+    redis: false
+    kafka: true
+  datastorePeers:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: data
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kafka
+migration:
+  enabled: true
+keda:
+  enabled: true
+  minReplicaCount: 2
+  maxReplicaCount: 4
+  consumerGroup: audit-service
+  topics:
+  - users.events
+  - catalog.events
+  - orders.events
+  - inventory.events
+  - payments.events
+  - shipping.events
+  - reviews.events
+  lagThreshold: '20'
+  tls: false

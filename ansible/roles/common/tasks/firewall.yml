@@ -1,0 +1,22 @@
+- name: UFW default policies
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    default: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+    - { direction: routed, policy: "{{ 'allow' if common_ip_forward | int == 1 else 'deny' }}" }
+
+- name: Allow SSH from trusted CIDRs
+  community.general.ufw:
+    rule: limit
+    port: "{{ common_ssh_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: ssh
+  loop: "{{ common_ssh_allowed_cidrs }}"
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+    logging: low

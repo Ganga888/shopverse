@@ -1,0 +1,67 @@
+# recommendation-service (staging) - values for charts/microservice. Release name == recommendation-service, namespace shop.
+# image.tag is bumped by the promote workflow (.github) - do not edit by hand outside a PR.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+# Kafka: MSK SASL/SCRAM on 9096; brokers + credentials come from Secrets Manager (AmazonMSK_shopverse_staging_app).
+global:
+  env: staging
+  domain: staging.ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/recommendation-service
+  tag: bootstrap
+replicaCount: 2
+logLevel: info
+nodeEnv: production
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+ingress:
+  enabled: true
+  path: /api/v1/recommendations
+serviceAccount:
+  irsa:
+    enabled: false
+env:
+  NODE_OPTIONS: --max-old-space-size=288
+  KAFKA_SSL: 'true'
+  KAFKA_CLIENT_ID: recommendation-service
+  KAFKA_GROUP_ID: recommendation-service
+  KAFKA_SASL_MECHANISM: scram-sha-512
+externalSecrets:
+  items:
+  - name: redis
+    remoteKey: shopverse/staging/redis
+    keys:
+      REDIS_URL: url
+  - name: kafka
+    remoteKey: AmazonMSK_shopverse_staging_app
+    keys:
+      KAFKA_BROKERS: brokers
+      KAFKA_SASL_USERNAME: username
+      KAFKA_SASL_PASSWORD: password
+  enabled: true
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpread:
+  zoneWhenUnsatisfiable: ScheduleAnyway
+prometheusRule:
+  severity: warning
+networkPolicy:
+  callers: []
+  egressToServices:
+  - catalog-service
+  egress:
+    postgres: false
+    redis: true
+    kafka: true

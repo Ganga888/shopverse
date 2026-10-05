@@ -1,0 +1,42 @@
+# Checkov configuration for CI (ci/ and .github/ call: checkov --config-file security/checkov/.checkov.yaml)
+# Scans IaC + manifests; any finding not skipped below fails the pipeline.
+directory:
+  - terraform
+  - charts
+  - gitops
+  - security
+  - services
+framework:
+  - terraform
+  - kubernetes
+  - helm
+  - kustomize
+  - dockerfile
+  - github_actions
+  - secrets
+skip-path:
+  - .terraform
+  - node_modules
+  - dist
+  - gitops/envs/.*/apps/optional
+download-external-modules: true
+evaluate-variables: true
+compact: true
+quiet: true
+output:
+  - cli
+  - sarif
+output-file-path: console,checkov-results
+soft-fail: false
+# Accepted risks. Each entry: why it does not apply / is mitigated elsewhere. Review quarterly.
+skip-check:
+  # Kubernetes / Helm
+  - CKV_K8S_43     # "image should use digest": tags are git SHAs; Kyverno mutateDigest pins the verified digest at admission
+  - CKV_K8S_15     # "imagePullPolicy Always": immutable SHA tags + ECR tag immutability make IfNotPresent safe
+  - CKV2_K8S_6     # "pod without NetworkPolicy": policies are namespace-level default deny + per-service chart policy (not visible to per-file scan)
+  - CKV_K8S_35     # "prefer secrets as files": ESO-managed secrets as env per contract; rotation restarts pods via checksum
+  - CKV_K8S_21     # "default namespace": namespace is set by ArgoCD destination (shop), not in the chart
+  # Terraform
+  - CKV_AWS_144    # S3 cross-region replication: DR uses Velero/RDS snapshots copied by AWS Backup instead (dr-restore.md)
+  - CKV2_AWS_62    # S3 event notifications: not required for media/web/velero buckets
+  - CKV_AWS_18     # S3 access logging on the access-log bucket itself (would recurse)

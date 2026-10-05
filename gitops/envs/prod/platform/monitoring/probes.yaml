@@ -1,0 +1,42 @@
+# Synthetic probes through the public path (Route 53 -> CloudFront/ALB -> WAF -> nginx). Feed the
+# EndpointProbeFailing and TLSCertificateExpiry* alerts (observability/prometheus-rules/certificates.yaml).
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: public-endpoints
+  namespace: monitoring
+spec:
+  jobName: blackbox
+  interval: 60s
+  module: http_2xx
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      labels:
+        env: prod
+      static:
+          - https://ganga888.in/
+          - https://www.ganga888.in/
+          - https://api.ganga888.in/api/v1/products
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: ops-tools
+  namespace: monitoring
+spec:
+  jobName: blackbox
+  interval: 120s
+  module: http_2xx_or_auth
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+  targets:
+    staticConfig:
+      labels:
+        env: prod
+      static:
+          - https://argocd.ganga888.in/healthz
+          - https://grafana.ganga888.in/api/health
+          - https://kibana.ganga888.in/api/status
+          - https://jaeger.ganga888.in/

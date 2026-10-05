@@ -1,0 +1,40 @@
+# Source of the Jenkins stack (written by the CI workstream): ci/jenkins/docker-compose.yml
+jenkins_compose_src: "{{ playbook_dir }}/../../ci/jenkins/"
+jenkins_install_dir: /opt/jenkins
+jenkins_compose_project: jenkins
+jenkins_home_dir: "{{ jenkins_install_dir }}/jenkins_home"
+jenkins_uid: 1000                 # uid of the jenkins user inside the official image
+jenkins_url: "https://jenkins.ganga888.in"
+jenkins_http_port: 8085           # host port published by ci/jenkins/docker-compose.yml (ALB target)
+sonarqube_http_port: 9000
+jenkins_allowed_cidrs: ["10.50.0.0/16"]   # CI VPC (terraform/ci vpc_cidr): only the ALB reaches the host
+
+# Secrets Manager secret created by terraform/ci; read ON THE HOST with the instance role
+# and written to {{ jenkins_install_dir }}/.env.secrets (0600). Nothing secret passes through Ansible.
+jenkins_secret_id: "shopverse/ci/jenkins"
+# instance-profile on EC2; static-keys only for a Jenkins outside AWS
+jenkins_aws_auth_mode: instance-profile
+github_owner: "OWNER"
+github_repo: "shopverse"
+jenkins_ecr_registry: "{{ aws_account_id | default('111122223333') }}.dkr.ecr.{{ aws_region | default('ap-south-1') }}.amazonaws.com"
+jenkins_cosign_key_ref: "awskms:///alias/shopverse-cosign"
+
+# Optional tar backup of a bind-mounted JENKINS_HOME to S3; "" disables. On EC2 the whole data volume
+# (/var/lib/docker: Jenkins home + SonarQube) is already snapshotted daily by DLM (terraform/ci).
+jenkins_backup_bucket: ""
+jenkins_backup_prefix: "jenkins-backups/{{ inventory_hostname }}"
+jenkins_backup_hour: "21"         # 21:00 UTC = 02:30 IST
+
+# Non-secret settings written to .env for docker compose. On EC2 AWS access comes from the
+# instance role, so no AWS keys exist at all.
+jenkins_env:
+  JENKINS_URL: "{{ jenkins_url }}/"
+  AWS_REGION: "{{ aws_region | default('ap-south-1') }}"
+  AWS_ACCOUNT_ID: "{{ aws_account_id | default('111122223333') }}"
+  AWS_AUTH_MODE: "{{ jenkins_aws_auth_mode }}"
+  GITHUB_OWNER: "{{ github_owner }}"
+  GITHUB_REPO: "{{ github_repo }}"
+  DOCKER_GID: "{{ jenkins_docker_gid | default('999') }}"
+  ECR_REGISTRY: "{{ jenkins_ecr_registry }}"
+  COSIGN_KEY: "{{ jenkins_cosign_key_ref }}"
+  JENKINS_HOME_DIR: "{{ jenkins_home_dir }}"

@@ -1,0 +1,10 @@
+galaxy_info:
+  role_name: docker
+  author: platform-team
+  description: Docker Engine + compose plugin from the official Docker apt repository
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

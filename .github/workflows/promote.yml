@@ -1,0 +1,116 @@
+# Promote an already-built, already-signed image from one environment to the
+# next by copying image.tag in the GitOps values file and opening a PR.
+# ArgoCD deploys when the PR is merged.
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to promote
+        type: choice
+        required: true
+        options:
+          - auth-service
+          - user-service
+          - catalog-service
+          - search-service
+          - inventory-service
+          - cart-service
+          - order-service
+          - payment-service
+          - shipping-service
+          - notification-service
+          - review-service
+          - promotion-service
+          - recommendation-service
+          - media-service
+          - audit-service
+      from_env:
+        description: Source environment
+        type: choice
+        options: [dev, staging]
+        required: true
+      to_env:
+        description: Target environment
+        type: choice
+        options: [staging, prod]
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate promotion path
+        run: |
+          case "${{ inputs.from_env }}->${{ inputs.to_env }}" in
+            "dev->staging"|"staging->prod") ;;
+            *) echo "::error::Only dev->staging and staging->prod are allowed"; exit 1 ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - name: Ensure yq (mikefarah v4)
+        run: |
+          if ! yq --version 2>/dev/null | grep -q 'version v4'; then
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+          yq --version
+
+      - name: Copy image tag
+        id: tag
+        env:
+          SVC: ${{ inputs.service }}
+          FROM: ${{ inputs.from_env }}
+          TO: ${{ inputs.to_env }}
+        run: |
+          set -euo pipefail
+          src="gitops/envs/$FROM/services/$SVC/values.yaml"
+          dst="gitops/envs/$TO/services/$SVC/values.yaml"
+          test -f "$src" || { echo "::error::$src not found"; exit 1; }
+          test -f "$dst" || { echo "::error::$dst not found"; exit 1; }
+
+          tag=$(yq '.image.tag' "$src")
+          old=$(yq '.image.tag' "$dst")
+          if [ -z "$tag" ] || [ "$tag" = "null" ]; then echo "::error::no image.tag in $src"; exit 1; fi
+          if [ "$tag" = "bootstrap" ]; then echo "::error::$SVC has never been built in $FROM"; exit 1; fi
+          if [ "$tag" = "$old" ]; then echo "::notice::$SVC already at $tag in $TO"; echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+
+          # In-place edit keeps comments and formatting.
+          TAG="$tag" yq -i '.image.tag = strenv(TAG)' "$dst"
+          git diff -- "$dst"
+          {
+            echo "changed=true"
+            echo "tag=$tag"
+            echo "old=$old"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.tag.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: promote/${{ inputs.service }}-${{ inputs.to_env }}-${{ steps.tag.outputs.tag }}
+          base: main
+          commit-message: "promote(${{ inputs.service }}): ${{ inputs.from_env }} -> ${{ inputs.to_env }} ${{ steps.tag.outputs.tag }}"
+          title: "promote ${{ inputs.service }} to ${{ inputs.to_env }}: ${{ steps.tag.outputs.tag }}"
+          labels: promotion, ${{ inputs.to_env }}
+          delete-branch: true
+          body: |
+            Promotes **${{ inputs.service }}** from `${{ inputs.from_env }}` to `${{ inputs.to_env }}`.
+
+            | | image tag |
+            |---|---|
+            | current `${{ inputs.to_env }}` | `${{ steps.tag.outputs.old }}` |
+            | new (from `${{ inputs.from_env }}`) | `${{ steps.tag.outputs.tag }}` |
+
+            File: `gitops/envs/${{ inputs.to_env }}/services/${{ inputs.service }}/values.yaml`
+
+            The image is the same digest that ran in `${{ inputs.from_env }}`; Kyverno verifies its cosign signature at admission.
+            ArgoCD syncs `${{ inputs.to_env }}` after merge (canary via Argo Rollouts where enabled).
+
+            Triggered by @${{ github.actor }} in run ${{ github.run_id }}.

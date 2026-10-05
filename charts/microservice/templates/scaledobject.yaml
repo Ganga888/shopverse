@@ -1,0 +1,91 @@
+{{- if .Values.keda.enabled }}
+{{- $name := include "microservice.name" . }}
+{{- $envMap := include "microservice.envMap" . | fromYaml }}
+{{- $brokers := .Values.keda.bootstrapServers | default (get $envMap "KAFKA_BROKERS") }}
+{{- if and (not $brokers) (not .Values.keda.bootstrapServersFromEnv) }}{{ fail "keda.enabled requires keda.bootstrapServers, env.KAFKA_BROKERS or keda.bootstrapServersFromEnv" }}{{ end }}
+{{- if and .Values.keda.sasl (not .Values.keda.saslSecretItem) }}{{ fail "keda.sasl requires keda.saslSecretItem" }}{{ end }}
+{{- if not .Values.keda.topics }}{{ fail "keda.enabled requires at least one keda.topics entry" }}{{ end }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+  annotations:
+    # Let KEDA take over replica management from an existing HPA on first switch.
+    scaledobject.keda.sh/transfer-hpa-ownership: "true"
+spec:
+  scaleTargetRef:
+    apiVersion: {{ include "microservice.workloadApiVersion" . }}
+    kind: {{ include "microservice.workloadKind" . }}
+    name: {{ $name }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      name: {{ $name }}-keda
+      {{- with .Values.autoscaling.behavior }}
+      behavior:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  triggers:
+    {{- range .Values.keda.topics }}
+    - type: kafka
+      name: lag-{{ . | replace "." "-" }}
+      metadata:
+        {{- if $brokers }}
+        bootstrapServers: {{ $brokers | quote }}
+        {{- else }}
+        bootstrapServersFromEnv: KAFKA_BROKERS
+        {{- end }}
+        consumerGroup: {{ $.Values.keda.consumerGroup | default $name | quote }}
+        topic: {{ . | quote }}
+        lagThreshold: {{ $.Values.keda.lagThreshold | quote }}
+        activationLagThreshold: {{ $.Values.keda.activationLagThreshold | quote }}
+        offsetResetPolicy: {{ $.Values.keda.offsetResetPolicy }}
+        allowIdleConsumers: "false"
+        limitToPartitionsWithLag: "true"
+        {{- if $.Values.keda.tls }}
+        tls: enable
+        {{- end }}
+        {{- if $.Values.keda.sasl }}
+        sasl: {{ $.Values.keda.sasl }}
+        {{- end }}
+      {{- if $.Values.keda.sasl }}
+      authenticationRef:
+        name: {{ $name }}-kafka
+      {{- end }}
+    {{- end }}
+    {{- if .Values.keda.cpuTrigger }}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.autoscaling.targetCPUUtilizationPercentage | quote }}
+    {{- end }}
+    {{- if .Values.keda.memoryTrigger }}
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: {{ .Values.autoscaling.targetMemoryUtilizationPercentage | default 80 | quote }}
+    {{- end }}
+{{- end }}
+{{- if and .Values.keda.enabled .Values.keda.sasl }}
+---
+# SCRAM credentials for the KEDA Kafka scaler, from the same Secret the pods use.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "microservice.name" . }}-kafka
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: username
+      name: {{ include "microservice.name" . }}-{{ .Values.keda.saslSecretItem }}
+      key: KAFKA_SASL_USERNAME
+    - parameter: password
+      name: {{ include "microservice.name" . }}-{{ .Values.keda.saslSecretItem }}
+      key: KAFKA_SASL_PASSWORD
+{{- end }}

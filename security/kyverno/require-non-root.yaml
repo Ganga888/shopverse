@@ -1,0 +1,59 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-non-root
+  annotations:
+    policies.kyverno.io/title: Require non-root, read-only, capability-free containers
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Defence in depth on top of the restricted Pod Security Standard enforced on the shop namespace:
+      contract requires runAsNonRoot (uid 10001), readOnlyRootFilesystem and drop ALL capabilities.
+spec:
+  background: true
+  rules:
+    - name: run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      validate:
+        failureAction: Enforce
+        message: "runAsNonRoot must be true at pod level or on every container, and runAsUser must not be 0."
+        anyPattern:
+          - spec:
+              securityContext:
+                runAsNonRoot: true
+                =(runAsUser): ">0"
+              =(initContainers):
+                - =(securityContext):
+                    =(runAsNonRoot): true
+                    =(runAsUser): ">0"
+              containers:
+                - =(securityContext):
+                    =(runAsNonRoot): true
+                    =(runAsUser): ">0"
+          - spec:
+              containers:
+                - securityContext:
+                    runAsNonRoot: true
+                    =(runAsUser): ">0"
+    - name: read-only-root-and-drop-all
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      validate:
+        failureAction: Enforce
+        message: "Containers must set readOnlyRootFilesystem: true, allowPrivilegeEscalation: false and drop ALL capabilities."
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  readOnlyRootFilesystem: true
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop: ["ALL"]

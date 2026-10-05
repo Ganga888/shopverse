@@ -1,0 +1,176 @@
+# Creates one Postgres role + database per service on the staging RDS instance.
+# Terraform writes the per-service credentials to Secrets Manager but cannot reach the private RDS endpoint,
+# so this idempotent Job (re-run on every platform-config sync) applies them from inside the VPC.
+# Runs in its own namespace because `shop` only admits ShopVerse images from ECR.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: db-admin
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-init-egress
+  namespace: db-admin
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - ports:
+        - { protocol: TCP, port: 5432 }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: rds-master
+  namespace: db-admin
+spec:
+  refreshInterval: 1h   # RDS rotates the managed master password; always use the current one
+  secretStoreRef: { name: aws-secrets-manager, kind: ClusterSecretStore }
+  target: { name: rds-master, creationPolicy: Owner }
+  data:
+    - secretKey: PGUSER
+      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:111122223333:secret:rds!db-00000000-0000-0000-0000-000000000000", property: username }  # tf-output: rds_master_secret_arn
+    - secretKey: PGPASSWORD
+      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:111122223333:secret:rds!db-00000000-0000-0000-0000-000000000000", property: password }  # tf-output: rds_master_secret_arn
+    - secretKey: PGHOST
+      remoteRef: { key: shopverse/staging/rds/auth-service, property: host }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: service-db-users
+  namespace: db-admin
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: aws-secrets-manager, kind: ClusterSecretStore }
+  target: { name: service-db-users, creationPolicy: Owner }
+  data:
+    - secretKey: AUTH_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/auth-service, property: username }
+    - secretKey: AUTH_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/auth-service, property: password }
+    - secretKey: USER_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/user-service, property: username }
+    - secretKey: USER_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/user-service, property: password }
+    - secretKey: CATALOG_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/catalog-service, property: username }
+    - secretKey: CATALOG_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/catalog-service, property: password }
+    - secretKey: SEARCH_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/search-service, property: username }
+    - secretKey: SEARCH_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/search-service, property: password }
+    - secretKey: INVENTORY_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/inventory-service, property: username }
+    - secretKey: INVENTORY_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/inventory-service, property: password }
+    - secretKey: ORDER_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/order-service, property: username }
+    - secretKey: ORDER_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/order-service, property: password }
+    - secretKey: PAYMENT_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/payment-service, property: username }
+    - secretKey: PAYMENT_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/payment-service, property: password }
+    - secretKey: SHIPPING_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/shipping-service, property: username }
+    - secretKey: SHIPPING_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/shipping-service, property: password }
+    - secretKey: REVIEW_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/review-service, property: username }
+    - secretKey: REVIEW_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/review-service, property: password }
+    - secretKey: PROMOTION_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/promotion-service, property: username }
+    - secretKey: PROMOTION_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/promotion-service, property: password }
+    - secretKey: AUDIT_SERVICE_USER
+      remoteRef: { key: shopverse/staging/rds/audit-service, property: username }
+    - secretKey: AUDIT_SERVICE_PASSWORD
+      remoteRef: { key: shopverse/staging/rds/audit-service, property: password }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-script
+  namespace: db-admin
+data:
+  init.sh: |
+    #!/bin/sh
+    set -eu
+    export PGDATABASE=postgres PGSSLMODE=require PGCONNECT_TIMEOUT=10
+    for pair in AUTH_SERVICE:auth USER_SERVICE:users CATALOG_SERVICE:catalog SEARCH_SERVICE:search INVENTORY_SERVICE:inventory ORDER_SERVICE:orders PAYMENT_SERVICE:payments SHIPPING_SERVICE:shipping REVIEW_SERVICE:reviews PROMOTION_SERVICE:promotions AUDIT_SERVICE:audit; do
+      prefix="${pair%%:*}"; db="${pair##*:}"
+      user="$(printenv "${prefix}_USER")"; pass="$(printenv "${prefix}_PASSWORD")"
+      echo "ensuring role ${user} and database ${db}"
+      psql -v ON_ERROR_STOP=1 -v u="$user" -v p="$pass" <<'SQL'
+    SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'u', :'p') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'u') \gexec
+    SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'u', :'p') \gexec
+    SQL
+      if ! psql -tAc "SELECT 1 FROM pg_database WHERE datname='${db}'" | grep -q 1; then
+        psql -v ON_ERROR_STOP=1 -c "GRANT \"${user}\" TO CURRENT_USER" -c "CREATE DATABASE \"${db}\" OWNER \"${user}\""
+      fi
+      psql -v ON_ERROR_STOP=1 -c "REVOKE ALL ON DATABASE \"${db}\" FROM PUBLIC"
+    done
+    echo "db-init complete"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  namespace: db-admin
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: db-init, app.kubernetes.io/part-of: shopverse }
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: psql
+          image: public.ecr.aws/docker/library/postgres:16.4-alpine
+          command: ["/bin/sh", "/scripts/init.sh"]
+          envFrom:
+            - secretRef: { name: rds-master }
+            - secretRef: { name: service-db-users }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: scripts
+          configMap: { name: db-init-script, defaultMode: 0555 }
+        - name: tmp
+          emptyDir: {}

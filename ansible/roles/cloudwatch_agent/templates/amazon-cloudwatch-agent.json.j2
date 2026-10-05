@@ -1,0 +1,38 @@
+{#- {{ ansible_managed }} -#}
+{%- set ns = namespace(files=[]) -%}
+{%- for l in cloudwatch_agent_logs + cloudwatch_agent_extra_logs -%}
+{%-   set ns.files = ns.files + [{
+        "file_path": l.file,
+        "log_group_name": cloudwatch_agent_log_group_prefix ~ "/" ~ l.group,
+        "log_stream_name": "{instance_id}",
+        "retention_in_days": cloudwatch_agent_log_retention_days | int,
+        "timezone": "UTC"
+      }] -%}
+{%- endfor -%}
+{{ {
+  "agent": {
+    "metrics_collection_interval": cloudwatch_agent_metrics_interval | int,
+    "run_as_user": "root",
+    "region": aws_region | default("ap-south-1")
+  },
+  "metrics": {
+    "namespace": cloudwatch_agent_namespace,
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}",
+      "InstanceType": "${aws:InstanceType}"
+    },
+    "aggregation_dimensions": [["InstanceId"]],
+    "metrics_collected": {
+      "cpu": {"measurement": ["usage_idle", "usage_iowait", "usage_user", "usage_system"], "totalcpu": true},
+      "mem": {"measurement": ["mem_used_percent", "mem_available"]},
+      "disk": {"measurement": ["used_percent", "inodes_free"], "resources": ["/"], "ignore_file_system_types": ["sysfs", "devtmpfs", "tmpfs", "overlay", "squashfs"]},
+      "diskio": {"measurement": ["io_time", "write_bytes", "read_bytes"]},
+      "swap": {"measurement": ["swap_used_percent"]},
+      "netstat": {"measurement": ["tcp_established", "tcp_time_wait"]}
+    }
+  },
+  "logs": {
+    "logs_collected": {"files": {"collect_list": ns.files}},
+    "force_flush_interval": 15
+  }
+} | to_nice_json }}

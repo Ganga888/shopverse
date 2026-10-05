@@ -1,0 +1,40 @@
+# Karpenter node template: Amazon Linux 2023, IMDSv2 only (hop limit 1 => pods use IRSA, not the node role),
+# encrypted gp3 root volume, subnets/SGs discovered by tag karpenter.sh/discovery=shopverse-staging (Terraform).
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  role: shopverse-staging-karpenter-node          # tf-output: karpenter_node_role_name
+  amiSelectorTerms:
+    - alias: al2023@latest   # prod pins the AMI release; bump via PR
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: shopverse-staging
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: shopverse-staging
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 1
+    httpTokens: required
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 50Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  kubelet:
+    maxPods: 58
+    systemReserved: { cpu: 100m, memory: 200Mi, ephemeral-storage: 1Gi }
+    kubeReserved: { cpu: 100m, memory: 300Mi, ephemeral-storage: 1Gi }
+    evictionHard: { memory.available: 5%, nodefs.available: 10%, nodefs.inodesFree: 10% }
+  tags:
+    Project: shopverse
+    Environment: staging
+    Owner: platform-team
+    CostCenter: shopverse
+    ManagedBy: terraform
+    karpenter.sh/discovery: shopverse-staging

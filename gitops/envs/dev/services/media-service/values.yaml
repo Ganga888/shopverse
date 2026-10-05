@@ -1,0 +1,62 @@
+# media-service (dev) - values for charts/microservice. Release name == media-service, namespace shop.
+# image.tag is bumped by Jenkins (ci/Jenkinsfile) after every main-branch build.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+global:
+  env: dev
+  domain: dev.ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/media-service
+  tag: bootstrap
+replicaCount: 2
+logLevel: debug
+nodeEnv: production
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+ingress:
+  enabled: true
+  path: /api/v1/media
+serviceAccount:
+  irsa:
+    enabled: true
+    roleArn: arn:aws:iam::111122223333:role/shopverse-dev-media-service
+env:
+  NODE_OPTIONS: --max-old-space-size=192
+  S3_BUCKET: shopverse-dev-media
+  CDN_BASE_URL: https://cdn.dev.ganga888.in
+  PRESIGNED_URL_TTL_SECONDS: '900'
+externalSecrets:
+  enabled: false
+  items: []
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpread:
+  zoneWhenUnsatisfiable: ScheduleAnyway
+prometheusRule:
+  severity: warning
+networkPolicy:
+  callers: []
+  egressToServices: []
+  egress:
+    postgres: false
+    redis: false
+    kafka: false
+  datastorePeers:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: data
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kafka

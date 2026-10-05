@@ -1,0 +1,24 @@
+{{/* ShopVerse notification templates. They redefine Alertmanager's default template names so that
+     alertmanager.yaml.tmpl needs no Go-template syntax of its own (it is itself an ESO template). */}}
+
+{{ define "shopverse.env" }}{{ if .CommonLabels.env }}{{ .CommonLabels.env }}{{ else }}{{ (index .Alerts 0).Labels.env }}{{ end }}{{ end }}
+
+{{ define "slack.default.title" -}}
+[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] [{{ template "shopverse.env" . }}] {{ .CommonLabels.alertname }}{{ if .CommonLabels.service }} - {{ .CommonLabels.service }}{{ end }}
+{{- end }}
+
+{{ define "slack.default.text" -}}
+{{ range .Alerts -}}
+*{{ .Labels.severity | toUpper }}* {{ .Annotations.summary }}
+{{ if .Annotations.description }}> {{ .Annotations.description }}
+{{ end -}}
+{{ if .Annotations.runbook_url }}:book: <{{ .Annotations.runbook_url }}|Runbook>  {{ end -}}
+{{ if .Annotations.dashboard }}:bar_chart: <{{ .Annotations.dashboard }}|Dashboard>  {{ end -}}
+<{{ .GeneratorURL }}|Query>
+{{ end -}}
+{{- end }}
+
+
+{{ define "email.default.subject" -}}
+[{{ .Status | toUpper }}] [{{ template "shopverse.env" . }}] {{ .CommonLabels.alertname }} ({{ .Alerts | len }})
+{{- end }}

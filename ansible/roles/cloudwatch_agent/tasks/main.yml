@@ -1,0 +1,40 @@
+- name: Check whether the agent is installed
+  ansible.builtin.stat:
+    path: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+  register: cwagent_bin
+
+- name: Install the CloudWatch agent
+  when: not cwagent_bin.stat.exists
+  block:
+    - name: Download package
+      ansible.builtin.get_url:
+        url: "{{ cloudwatch_agent_deb_url }}"
+        dest: /tmp/amazon-cloudwatch-agent.deb
+        mode: "0644"
+
+    - name: Install package
+      ansible.builtin.apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+
+- name: Agent configuration
+  ansible.builtin.template:
+    src: amazon-cloudwatch-agent.json.j2
+    dest: /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+    owner: root
+    group: root
+    mode: "0644"
+  register: cwagent_config
+
+- name: Load configuration and (re)start the agent
+  ansible.builtin.command: >-
+    /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl
+    -a fetch-config -m ec2 -s
+    -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+  when: cwagent_config is changed or not cwagent_bin.stat.exists
+  changed_when: true
+
+- name: Agent enabled
+  ansible.builtin.systemd_service:
+    name: amazon-cloudwatch-agent
+    enabled: true
+    state: started

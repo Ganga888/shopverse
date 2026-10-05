@@ -1,0 +1,49 @@
+# ECK Elasticsearch: 1 node(s) (dev). Logs (fluent-bit) + Jaeger span storage.
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: shopverse
+  namespace: logging
+spec:
+  version: 8.17.4
+  auth:
+    roles:
+      - secretName: es-roles
+    fileRealm:
+      - secretName: es-user-fluentbit
+      - secretName: es-user-jaeger
+      - secretName: es-user-grafana
+  nodeSets:
+    - name: default
+      count: 1
+      config:
+        node.roles: [master, data, ingest]
+        node.store.allow_mmap: false
+        cluster.routing.allocation.awareness.attributes: k8s_node_name
+        action.destructive_requires_name: true
+      podTemplate:
+        metadata:
+          labels:
+            app.kubernetes.io/part-of: shopverse
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                requests: { cpu: 500m, memory: 2Gi }
+                limits: { memory: 2Gi }
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  elasticsearch.k8s.elastic.co/cluster-name: shopverse
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes: [ReadWriteOnce]
+            storageClassName: gp3
+            resources:
+              requests:
+                storage: 30Gi

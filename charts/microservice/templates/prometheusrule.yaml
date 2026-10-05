@@ -1,0 +1,75 @@
+{{- if and .Values.metrics.enabled .Values.prometheusRule.enabled }}
+{{- $name := include "microservice.name" . }}
+{{- $r := .Values.prometheusRule }}
+{{- $ns := .Release.Namespace }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ $name }}.rules
+      rules:
+        - alert: {{ $name | replace "-" "_" | camelcase }}High5xxRate
+          expr: |
+            (
+              sum(rate(http_request_duration_seconds_count{namespace="{{ $ns }}",job="{{ $name }}",status=~"5.."}[5m]))
+              /
+              sum(rate(http_request_duration_seconds_count{namespace="{{ $ns }}",job="{{ $name }}"}[5m]))
+            ) > {{ $r.errorRateThreshold }}
+          for: 5m
+          labels:
+            severity: {{ $r.severity }}
+            service: {{ $name }}
+            env: {{ .Values.global.env }}
+          annotations:
+            summary: "{{ $name }}: 5xx ratio above {{ mulf $r.errorRateThreshold 100 }}%"
+            description: "{{ $name }} 5xx ratio is {{ "{{" }} $value | humanizePercentage {{ "}}" }} over the last 5m."
+            runbook_url: {{ .Values.global.runbookBaseUrl }}/docs/runbooks/incident-response.md
+            dashboard: "https://grafana.{{ .Values.global.domain }}/d/shopverse-red/service-red-overview?var-service={{ $name }}"
+        - alert: {{ $name | replace "-" "_" | camelcase }}HighP95Latency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{namespace="{{ $ns }}",job="{{ $name }}"}[5m]))
+            ) > {{ $r.p95LatencyThresholdSeconds }}
+          for: 10m
+          labels:
+            severity: warning
+            service: {{ $name }}
+            env: {{ .Values.global.env }}
+          annotations:
+            summary: "{{ $name }}: p95 latency above {{ $r.p95LatencyThresholdSeconds }}s"
+            description: "{{ $name }} p95 latency is {{ "{{" }} $value | humanizeDuration {{ "}}" }}."
+            runbook_url: {{ .Values.global.runbookBaseUrl }}/docs/runbooks/scaling.md
+        - alert: {{ $name | replace "-" "_" | camelcase }}PodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace="{{ $ns }}",container="{{ $name }}"}[15m]) > {{ $r.restartThreshold }}
+          for: 0m
+          labels:
+            severity: warning
+            service: {{ $name }}
+            env: {{ .Values.global.env }}
+          annotations:
+            summary: "{{ $name }}: pod {{ "{{" }} $labels.pod {{ "}}" }} restarted more than {{ $r.restartThreshold }} times in 15m"
+            description: "Check `kubectl -n {{ $ns }} logs {{ "{{" }} $labels.pod {{ "}}" }} --previous` and Kibana (service.name={{ $name }})."
+            runbook_url: {{ .Values.global.runbookBaseUrl }}/docs/runbooks/incident-response.md
+        - alert: {{ $name | replace "-" "_" | camelcase }}NoReadyPods
+          expr: |
+            sum(kube_pod_status_ready{namespace="{{ $ns }}",condition="true",pod=~"{{ $name }}-.*"}) == 0
+          for: 5m
+          labels:
+            severity: critical
+            service: {{ $name }}
+            env: {{ .Values.global.env }}
+          annotations:
+            summary: "{{ $name }} has no Ready pods"
+            runbook_url: {{ .Values.global.runbookBaseUrl }}/docs/runbooks/incident-response.md
+        {{- with $r.extraRules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

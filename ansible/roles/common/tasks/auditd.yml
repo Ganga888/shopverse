@@ -1,0 +1,27 @@
+- name: auditd daemon settings
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - { key: max_log_file, value: "{{ common_auditd_max_log_file_mb }}" }
+    - { key: max_log_file_action, value: keep_logs }
+    - { key: num_logs, value: "10" }
+    - { key: space_left_action, value: email }
+    - { key: admin_space_left_action, value: single }
+  notify: Restart auditd
+
+- name: audit rules (CIS-lite)
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/50-shopverse.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+
+- name: auditd enabled
+  ansible.builtin.systemd_service:
+    name: auditd
+    enabled: true
+    state: started

@@ -1,0 +1,100 @@
+# Installs the ILM policy (7d retention in dev) and the logs-k8s-* index template after every sync.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: es-ilm-setup
+  namespace: logging
+data:
+  setup.sh: |
+    #!/bin/sh
+    set -eu
+    ES=https://shopverse-es-http.logging.svc:9200
+    C="curl -sS --fail-with-body --cacert /es-ca/ca.crt -u elastic:${ES_PASSWORD} -H Content-Type:application/json"
+    until $C "$ES/_cluster/health?wait_for_status=yellow&timeout=30s" >/dev/null; do
+      echo "waiting for elasticsearch"; sleep 10
+    done
+    $C -X PUT "$ES/_ilm/policy/shopverse-logs" -d @/config/ilm-policy.json
+    $C -X PUT "$ES/_index_template/logs-k8s" -d @/config/index-template.json
+    echo "ILM policy + index template applied"
+  ilm-policy.json: |
+    {
+      "policy": {
+        "phases": {
+          "hot":    { "actions": { "set_priority": { "priority": 100 } } },
+          "warm":   { "min_age": "2d", "actions": { "forcemerge": { "max_num_segments": 1 }, "set_priority": { "priority": 50 } } },
+          "delete": { "min_age": "7d", "actions": { "delete": {} } }
+        }
+      }
+    }
+  index-template.json: |
+    {
+      "index_patterns": ["logs-k8s-*"],
+      "priority": 200,
+      "template": {
+        "settings": {
+          "number_of_shards": 1,
+          "number_of_replicas": 0,
+          "index.lifecycle.name": "shopverse-logs",
+          "index.refresh_interval": "5s"
+        },
+        "mappings": {
+          "dynamic_templates": [
+            { "strings_as_keyword": { "match_mapping_type": "string", "mapping": { "type": "keyword", "ignore_above": 1024 } } }
+          ],
+          "properties": {
+            "@timestamp":    { "type": "date" },
+            "message":       { "type": "text" },
+            "log":           { "type": "text" },
+            "level":         { "type": "keyword" },
+            "trace_id":      { "type": "keyword" },
+            "span_id":       { "type": "keyword" },
+            "correlationId": { "type": "keyword" },
+            "service":       { "type": "keyword" },
+            "env":           { "type": "keyword" }
+          }
+        }
+      }
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: es-ilm-setup
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 6
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: setup
+          image: curlimages/curl:8.11.1
+          command: ["/bin/sh", "/config/setup.sh"]
+          env:
+            - name: ES_PASSWORD
+              valueFrom: { secretKeyRef: { name: shopverse-es-elastic-user, key: elastic } }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /config }
+            - { name: es-ca, mountPath: /es-ca }
+      volumes:
+        - name: config
+          configMap: { name: es-ilm-setup }
+        - name: es-ca
+          secret: { secretName: shopverse-es-http-certs-public }

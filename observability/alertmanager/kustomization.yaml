@@ -1,0 +1,19 @@
+# Alertmanager config template + message templates (namespace monitoring).
+#  - alertmanager-config-template: consumed by ExternalSecret monitoring/alertmanager-shopverse
+#    (gitops/envs/<env>/platform/external-secrets/platform-credentials.yaml), which injects the
+#    Slack/SMTP credentials from AWS Secrets Manager and writes Secret alertmanager-shopverse.
+#  - alertmanager-templates: mounted into Alertmanager via alertmanagerSpec.configMaps.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    app.kubernetes.io/part-of: shopverse
+configMapGenerator:
+  - name: alertmanager-config-template
+    files:
+      - alertmanager.yaml=alertmanager.yaml.tmpl
+  - name: alertmanager-templates
+    files:
+      - shopverse.tmpl

@@ -1,0 +1,42 @@
+# OPTIONAL - NOT synced. The root app only reads gitops/envs/staging/apps/*.yaml (no recursion),
+# so files in optional/ are inert until moved one directory up.
+#
+# Linkerd adds mTLS between pods and golden metrics per route. It is disabled by default because:
+#   * the platform already has OTel tracing + RED metrics from the services themselves;
+#   * the linkerd-proxy init container needs NET_ADMIN unless the linkerd-cni plugin is installed,
+#     which conflicts with the restricted PSS on the shop namespace;
+#   * it needs a trust anchor + issuer certificate (cert-manager or step-generated, rotated yearly).
+# To enable: install linkerd-crds + linkerd-cni, create the identity issuer secret
+# (linkerd-identity-issuer, from AWS Secrets Manager via ExternalSecret), set the trust anchor
+# below, move this file to ../, and annotate the shop namespace with linkerd.io/inject=enabled.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: linkerd-control-plane
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://helm.linkerd.io/edge
+    chart: linkerd-control-plane
+    targetRevision: 2025.1.2
+    helm:
+      releaseName: linkerd-control-plane
+      valuesObject:
+        cniEnabled: true
+        identity:
+          externalCA: false
+          issuer:
+            scheme: kubernetes.io/tls      # secret linkerd-identity-issuer
+        identityTrustAnchorsPEM: |
+          # paste the PEM trust anchor (ca.crt) here
+        controllerReplicas: 2
+        enablePodAntiAffinity: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: linkerd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]

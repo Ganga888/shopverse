@@ -1,0 +1,49 @@
+{{- if .Values.rollout.enabled }}
+{{- $name := include "microservice.name" . }}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  {{- if not (or .Values.autoscaling.enabled .Values.keda.enabled) }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "microservice.workloadSelectorLabels" . | nindent 6 }}
+  template:
+    {{- include "microservice.podTemplate" . | nindent 4 }}
+  strategy:
+    canary:
+      stableService: {{ $name }}
+      canaryService: {{ $name }}-canary
+      maxSurge: "25%"
+      maxUnavailable: 0
+      abortScaleDownDelaySeconds: {{ .Values.rollout.abortScaleDownDelaySeconds }}
+      scaleDownDelaySeconds: {{ .Values.rollout.scaleDownDelaySeconds }}
+      {{- if and (eq .Values.rollout.trafficRouting "nginx") .Values.ingress.enabled }}
+      trafficRouting:
+        nginx:
+          stableIngress: {{ $name }}
+      {{- end }}
+      steps:
+        {{- range .Values.rollout.steps }}
+        {{- if hasKey . "analysis" }}
+        - analysis:
+            templates:
+              - templateName: {{ $name }}-canary-analysis
+            args:
+              - name: service-name
+                value: {{ $name }}
+              - name: canary-hash
+                valueFrom:
+                  podTemplateHashValue: Latest
+        {{- else }}
+        - {{ toYaml . | indent 10 | trim }}
+        {{- end }}
+        {{- end }}
+{{- end }}

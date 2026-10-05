@@ -1,0 +1,309 @@
+# Default values for the ShopVerse generic microservice chart.
+# Release name MUST equal the service name (e.g. order-service). See docs/CONTRACT.md.
+# Per-environment overrides live in gitops/envs/<env>/services/<service>/values.yaml.
+
+# -- Overrides the service name (defaults to .Release.Name). Leave empty: release name == service name.
+nameOverride: ""
+
+global:
+  # -- Environment name: dev | staging | prod
+  env: dev
+  # -- Base DNS domain of the environment (dev.ganga888.in, staging.ganga888.in, ganga888.in)
+  domain: dev.ganga888.in
+  # -- AWS account (placeholder, real value injected via env values)
+  awsAccountId: "111122223333"
+  awsRegion: ap-south-1
+  partOf: shopverse
+  # -- Base URL for runbook links in alerts
+  runbookBaseUrl: https://github.com/shopverse/aws-microservices/blob/main
+
+image:
+  # -- ECR repository. Defaults to <account>.dkr.ecr.<region>.amazonaws.com/shopverse/<service> when empty.
+  repository: ""
+  # -- Image tag (git sha). Bumped by the promote workflow.
+  tag: bootstrap
+  # -- Optional digest (sha256:...). When set, it is appended and takes precedence for pulls.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 2
+
+# -- Container port. Contract: every service listens on 8080.
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+# -- Public routing through ingress-nginx (/api/v1/<route> on api.<domain>)
+ingress:
+  # -- Enable in env values together with ingress.path
+  enabled: false
+  className: nginx
+  # -- Host. Defaults to api.<global.domain>
+  host: ""
+  # -- Route prefix, e.g. /api/v1/orders
+  path: ""
+  pathType: Prefix
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+
+serviceAccount:
+  create: true
+  # -- Defaults to the service name.
+  name: ""
+  # -- IRSA role ARN. When empty and irsa.enabled, built as arn:aws:iam::<account>:role/shopverse-<env>-<service>
+  irsa:
+    enabled: false
+    roleArn: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# -- Restricted Pod Security Standard compliant defaults (uid 10001, read-only root fs, drop ALL).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 10001
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+
+probes:
+  liveness:
+    path: /healthz/live
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    path: /healthz/ready
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 3
+  startup:
+    path: /healthz/live
+    periodSeconds: 3
+    timeoutSeconds: 2
+    failureThreshold: 30
+
+# -- Graceful shutdown: sleep before SIGTERM so endpoints are removed from nginx/ALB first.
+lifecycle:
+  preStopSleepSeconds: 10
+terminationGracePeriodSeconds: 40
+
+# -- Plain (non-secret) environment, rendered into the <service>-env ConfigMap.
+# Contract defaults (SERVICE_NAME, PORT, NODE_ENV, LOG_LEVEL, OTEL_EXPORTER_OTLP_ENDPOINT, JWT_ISSUER,
+# JWKS_URL, AWS_REGION) are generated automatically and may be overridden here.
+env: {}
+logLevel: info
+nodeEnv: production
+
+# -- Extra raw env entries (valueFrom etc.)
+extraEnv: []
+
+# -- Secrets from AWS Secrets Manager via External Secrets Operator.
+# Each item creates ExternalSecret + Secret "<service>-<name>" whose keys are the env var names.
+externalSecrets:
+  enabled: true
+  apiVersion: external-secrets.io/v1
+  storeName: aws-secrets-manager
+  storeKind: ClusterSecretStore
+  refreshInterval: 1h
+  items: []
+  # - name: db
+  #   remoteKey: shopverse/prod/rds/order-service
+  #   keys:            # ENV_VAR: secret property
+  #     DB_HOST: host
+  #     DB_PORT: port
+  #     DB_NAME: dbname
+  #     DB_USER: username
+  #     DB_PASSWORD: password
+
+extraVolumes: []
+extraVolumeMounts: []
+
+# -- emptyDir mounted at /tmp (needed with readOnlyRootFilesystem)
+tmpVolume:
+  enabled: true
+  sizeLimit: 64Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+topologySpread:
+  enabled: true
+  # -- DoNotSchedule in prod, ScheduleAnyway elsewhere
+  zoneWhenUnsatisfiable: ScheduleAnyway
+  hostWhenUnsatisfiable: ScheduleAnyway
+  maxSkew: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+      selectPolicy: Max
+
+# -- KEDA ScaledObject driven by Kafka consumer-group lag. When enabled it REPLACES the HPA
+# (KEDA manages its own HPA) and also carries the cpu/memory triggers.
+keda:
+  enabled: false
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 15
+  cooldownPeriod: 120
+  # -- Comma separated bootstrap servers. Defaults to env.KAFKA_BROKERS.
+  bootstrapServers: ""
+  # -- Consumer group. Contract: consumer group == service name.
+  consumerGroup: ""
+  # -- Topics to watch (one trigger per topic)
+  topics: []
+  lagThreshold: "50"
+  activationLagThreshold: "5"
+  offsetResetPolicy: earliest
+  # -- Enable TLS to the brokers (MSK)
+  tls: false
+  # -- Read bootstrap servers from the container env var KAFKA_BROKERS (e.g. synced from the MSK secret)
+  bootstrapServersFromEnv: false
+  # -- SASL mode for the lag scaler: "" (none) or scram_sha512 (MSK on 9096)
+  sasl: ""
+  # -- externalSecrets item whose Secret holds KAFKA_SASL_USERNAME / KAFKA_SASL_PASSWORD
+  saslSecretItem: ""
+  cpuTrigger: true
+  memoryTrigger: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# -- Argo Rollouts canary (replaces the Deployment when enabled)
+rollout:
+  enabled: false
+  # -- Use nginx traffic routing (needs ingress.enabled). Otherwise replica-ratio canary.
+  trafficRouting: nginx
+  steps:
+    - setWeight: 20
+    - pause: { duration: 2m }
+    - analysis: {}
+    - setWeight: 50
+    - pause: { duration: 3m }
+    - analysis: {}
+    - setWeight: 100
+  analysis:
+    # -- Prometheus endpoint used by AnalysisTemplate
+    prometheusAddress: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+    successRateThreshold: 0.99
+    # -- p95 latency threshold in seconds
+    p95LatencyThreshold: 0.5
+    interval: 1m
+    count: 3
+    failureLimit: 1
+  abortScaleDownDelaySeconds: 30
+  scaleDownDelaySeconds: 30
+
+metrics:
+  enabled: true
+  path: /metrics
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+    # -- Label selected by kube-prometheus-stack (serviceMonitorSelector)
+    labels:
+      release: kube-prometheus-stack
+
+prometheusRule:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+  errorRateThreshold: 0.05
+  p95LatencyThresholdSeconds: 0.5
+  restartThreshold: 3
+  # -- Override severity of the 5xx alert (critical in prod)
+  severity: warning
+  # -- Extra rules appended to the group
+  extraRules: []
+
+networkPolicy:
+  enabled: true
+  # -- Allow ingress from the ingress-nginx namespace
+  allowIngressNginx: true
+  # -- Allow ingress from any pod in the shop namespace (e.g. auth-service JWKS)
+  allowFromAllShopPods: false
+  # -- Services (app.kubernetes.io/name) in the same namespace allowed to call this one
+  callers: []
+  # -- Services in the same namespace this one calls on 8080 (auth-service is always allowed for JWKS)
+  egressToServices: []
+  # -- Allowed egress ports (any destination)
+  egress:
+    dns: true
+    postgres: true
+    redis: true
+    kafka: true
+    otlp: true
+    https: true
+  # -- Restrict datastore egress to these peers (empty = any destination on that port)
+  datastorePeers: []
+  extraIngress: []
+  extraEgress: []
+
+# -- DB migration Job (ArgoCD Sync hook wave -1 / helm pre-upgrade,post-install)
+migration:
+  enabled: false
+  command: ["node", "dist/migrate.js"]
+  args: []
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

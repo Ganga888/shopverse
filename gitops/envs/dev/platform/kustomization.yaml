@@ -1,0 +1,38 @@
+# platform-config Application (sync wave -3): everything that needs the operators/CRDs from earlier waves.
+# Shared, env-independent content (dashboards, rules, alertmanager template, Kyverno policies) is pulled
+# from observability/ and security/ so there is one source of truth.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - external-secrets
+  - karpenter
+  - ingress
+  - logging
+  - velero
+  - monitoring
+  - kafka
+  - data
+  - ../../../../observability/grafana-dashboards
+  - ../../../../observability/prometheus-rules
+  - ../../../../observability/alertmanager
+  - ../../../../security/kyverno
+
+# dev: signature verification and registry restriction report only (Audit), so engineers can test
+# unsigned images; staging/prod Enforce.
+patches:
+  - target:
+      group: kyverno.io
+      kind: ClusterPolicy
+      name: verify-shopverse-image-signatures
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/verifyImages/0/failureAction
+        value: Audit
+  - target:
+      group: kyverno.io
+      kind: ClusterPolicy
+      name: restrict-image-registries
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/validate/failureAction
+        value: Audit

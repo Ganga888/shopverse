@@ -1,0 +1,137 @@
+- name: Jenkins stack source exists on the controller
+  ansible.builtin.stat:
+    path: "{{ jenkins_compose_src }}/docker-compose.yml"
+  delegate_to: localhost
+  become: false
+  register: jenkins_src
+  run_once: true
+
+- name: Fail early if ci/jenkins/docker-compose.yml is missing
+  ansible.builtin.assert:
+    that: jenkins_src.stat.exists
+    fail_msg: "Expected {{ jenkins_compose_src }}/docker-compose.yml (ci/jenkins in the repo)"
+
+- name: Install directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    group: "{{ item.group | default('root') }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ jenkins_install_dir }}", mode: "0755" }
+    - { path: "{{ jenkins_home_dir }}", owner: "{{ jenkins_uid }}", group: "{{ jenkins_uid }}", mode: "0750" }
+
+- name: Copy the Jenkins stack (compose file, Dockerfile, JCasC, plugins)
+  ansible.builtin.copy:
+    src: "{{ jenkins_compose_src }}"
+    dest: "{{ jenkins_install_dir }}/"
+    owner: root
+    group: root
+    mode: u=rwX,g=rX,o=rX
+    directory_mode: "0755"
+  notify: Recreate jenkins stack
+
+- name: AWS CLI present
+  ansible.builtin.stat:
+    path: /usr/local/bin/aws
+  register: jenkins_awscli
+
+- name: Install AWS CLI v2
+  when: not jenkins_awscli.stat.exists
+  block:
+    - name: Download AWS CLI v2
+      ansible.builtin.unarchive:
+        src: "https://awscli.amazonaws.com/awscli-exe-linux-{{ 'aarch64' if ansible_facts['architecture'] == 'aarch64' else 'x86_64' }}.zip"
+        dest: /tmp
+        remote_src: true
+    - name: Install AWS CLI v2
+      ansible.builtin.command: /tmp/aws/install --update
+      changed_when: true
+
+- name: jq for the secrets script
+  ansible.builtin.apt:
+    name: jq
+    state: present
+
+- name: Host docker group id (the jenkins container joins it to use the socket)
+  ansible.builtin.getent:
+    database: group
+    key: docker
+
+- name: Remember the docker gid
+  ansible.builtin.set_fact:
+    jenkins_docker_gid: "{{ ansible_facts.getent_group.docker[1] }}"
+
+- name: Secrets refresh script (Secrets Manager -> .env.secrets, via the instance role)
+  ansible.builtin.template:
+    src: jenkins-secrets-env.sh.j2
+    dest: /usr/local/sbin/jenkins-secrets-env
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Write .env.secrets from Secrets Manager
+  ansible.builtin.command: /usr/local/sbin/jenkins-secrets-env
+  register: jenkins_secrets
+  changed_when: "'changed' in jenkins_secrets.stdout"
+  notify: Recreate jenkins stack
+
+- name: Non-secret environment for docker compose
+  ansible.builtin.template:
+    src: jenkins.env.j2
+    dest: "{{ jenkins_install_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Recreate jenkins stack
+
+- name: Start / update the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ jenkins_install_dir }}"
+    project_name: "{{ jenkins_compose_project }}"
+    env_files: [.env, .env.secrets]
+    state: present
+    pull: missing
+    build: policy
+    remove_orphans: true
+  register: jenkins_compose
+
+- name: Wait for Jenkins to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/login"
+    status_code: [200, 403]
+  register: jenkins_up
+  retries: 30
+  delay: 10
+  until: jenkins_up.status in [200, 403]
+  changed_when: false
+
+- name: Firewall - Jenkins UI/agents from trusted CIDRs
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.1 }}"
+    proto: tcp
+    src: "{{ item.0 }}"
+    comment: jenkins
+  loop: "{{ jenkins_allowed_cidrs | product([jenkins_http_port | string, sonarqube_http_port | string]) | list }}"
+
+- name: Nightly JENKINS_HOME backup to S3
+  when: jenkins_backup_bucket | length > 0
+  block:
+    - name: Backup script
+      ansible.builtin.template:
+        src: jenkins-backup.sh.j2
+        dest: /usr/local/sbin/jenkins-backup
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Backup cron
+      ansible.builtin.cron:
+        name: jenkins-backup
+        cron_file: jenkins-backup
+        user: root
+        minute: "0"
+        hour: "{{ jenkins_backup_hour }}"
+        job: "/usr/local/sbin/jenkins-backup >>/var/log/jenkins-backup.log 2>&1"

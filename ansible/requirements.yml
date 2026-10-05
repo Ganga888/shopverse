@@ -1,0 +1,17 @@
+# ansible-galaxy collection install -r requirements.yml -p ./collections
+collections:
+  - name: amazon.aws
+    version: ">=8.2.0,<10.0.0"
+  - name: community.aws
+    version: ">=8.0.0,<10.0.0"
+  - name: community.general
+    version: ">=9.0.0"
+  - name: community.docker
+    version: ">=3.10.0"
+  - name: community.postgresql
+    version: ">=3.4.0"
+  - name: ansible.posix
+    version: ">=1.5.4"
+  - name: kubernetes.core
+    version: ">=5.0.0"
+# Python on the control node: boto3>=1.34 botocore>=1.34 psycopg2-binary kubernetes

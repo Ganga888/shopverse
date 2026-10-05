@@ -1,0 +1,74 @@
+# Self-hosted CI: Jenkins LTS (with docker socket) + SonarQube Community + its Postgres.
+#   Laptop: cp .env.example .env && edit && docker compose up -d --build
+#   EC2 (terraform/ci + ansible/playbooks/jenkins.yml): Ansible writes .env, the host writes .env.secrets from
+#   Secrets Manager, and the stack starts with: docker compose --env-file .env --env-file .env.secrets up -d
+# SonarQube needs: sudo sysctl -w vm.max_map_count=524288 && sudo sysctl -w fs.file-max=131072 on the host.
+name: shopverse-ci
+
+services:
+  jenkins:
+    build: .
+    image: shopverse/jenkins:lts
+    restart: unless-stopped
+    env_file:
+      - .env                      # non-secret settings
+      - path: .env.secrets        # on EC2: written from Secrets Manager by /usr/local/sbin/jenkins-secrets-env
+        required: false
+    group_add:
+      - "${DOCKER_GID:-999}"   # host docker group so the jenkins user can use /var/run/docker.sock
+    ports:
+      - "8085:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      sonarqube:
+        condition: service_healthy
+
+  sonarqube:
+    image: sonarqube:community
+    restart: unless-stopped
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+    ports:
+      - "9000:9000"
+    ulimits:
+      nofile: { soft: 131072, hard: 131072 }
+      nproc: { soft: 8192, hard: 8192 }
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+      - sonar_extensions:/opt/sonarqube/extensions
+      - sonar_logs:/opt/sonarqube/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+    depends_on:
+      sonar-db:
+        condition: service_healthy
+
+  sonar-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      POSTGRES_DB: sonar
+    volumes:
+      - sonar_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  jenkins_home:
+  sonar_data:
+  sonar_extensions:
+  sonar_logs:
+  sonar_db:

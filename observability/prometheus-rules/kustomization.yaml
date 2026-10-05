@@ -1,0 +1,9 @@
+# Platform-wide PrometheusRules (per-service 5xx/latency/restart alerts ship with charts/microservice).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - slo-availability.yaml
+  - kafka.yaml
+  - nodes.yaml
+  - pods.yaml
+  - certificates.yaml

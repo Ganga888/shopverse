@@ -1,0 +1,10 @@
+galaxy_info:
+  role_name: node_exporter
+  author: platform-team
+  description: Prometheus node_exporter as a hardened systemd service, firewalled to the monitoring CIDRs
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

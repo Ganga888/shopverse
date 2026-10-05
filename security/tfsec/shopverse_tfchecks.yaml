@@ -1,0 +1,46 @@
+# Custom tfsec checks enforcing docs/CONTRACT.md conventions.
+checks:
+  - code: CUS001
+    description: The AWS provider must set default_tags with the ShopVerse mandatory tags
+    impact: Resources without Project/Environment/Owner/CostCenter/ManagedBy tags break cost allocation and ownership
+    resolution: Add default_tags { tags = { Project = "shopverse", Environment = var.env, Owner = "platform-team", CostCenter = "shopverse", ManagedBy = "terraform" } }
+    requiredTypes: [provider]
+    requiredLabels: [aws]
+    severity: HIGH
+    matchSpec:
+      name: default_tags
+      action: isPresent
+      subMatch:
+        name: tags
+        action: contains
+        value: Project
+        ignoreUndefined: false
+    errorMessage: AWS provider is missing default_tags with the mandatory ShopVerse tags
+    relatedLinks:
+      - https://github.com/shopverse/aws-microservices/blob/main/docs/CONTRACT.md
+  - code: CUS002
+    description: Resource names must start with the shopverse-<env> prefix
+    impact: Inconsistent names break IAM conditions scoped to shopverse-<env>-* and cost reports
+    resolution: Prefix the name with "shopverse-${var.env}-"
+    requiredTypes: [resource]
+    requiredLabels: [aws_s3_bucket, aws_db_instance, aws_eks_cluster, aws_msk_cluster, aws_elasticache_replication_group]
+    severity: MEDIUM
+    matchSpec:
+      action: or
+      predicateMatchSpec:
+        - name: bucket
+          action: startsWith
+          value: shopverse-
+        - name: identifier
+          action: startsWith
+          value: shopverse-
+        - name: name
+          action: startsWith
+          value: shopverse-
+        - name: cluster_name
+          action: startsWith
+          value: shopverse-
+        - name: replication_group_id
+          action: startsWith
+          value: shopverse-
+    errorMessage: Resource name does not use the shopverse-<env> prefix

@@ -1,0 +1,36 @@
+# TLS certificate expiry. Public endpoints are probed through the ALB by blackbox-exporter
+# (Probe CRs in gitops/envs/<env>/platform/monitoring/probes.yaml) - this catches an ACM cert that
+# failed DNS-validated renewal. In-cluster client certs are covered by the kube-prometheus-stack defaults.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopverse-certificates
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: shopverse
+spec:
+  groups:
+    - name: shopverse-certificates
+      rules:
+        - alert: TLSCertificateExpiringSoon
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 21
+          for: 1h
+          labels: { severity: warning }
+          annotations:
+            summary: "TLS certificate for {{ $labels.instance }} expires in {{ $value | humanize }} days"
+            description: "ACM normally renews 60 days before expiry; check the ACM console and the Route 53 validation CNAME."
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/secret-rotation.md
+        - alert: TLSCertificateExpiryCritical
+          expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 7
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "TLS certificate for {{ $labels.instance }} expires in {{ $value | humanize }} days"
+        - alert: EndpointProbeFailing
+          expr: probe_success{job="blackbox"} == 0
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Synthetic probe of {{ $labels.instance }} is failing (ALB/WAF/DNS/ingress path broken?)"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md

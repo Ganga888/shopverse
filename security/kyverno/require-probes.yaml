@@ -1,0 +1,49 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-probes
+  annotations:
+    policies.kyverno.io/title: Require liveness, readiness and startup probes
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Serving pods in shop must define all three probes (contract: /healthz/live, /healthz/ready).
+      One-shot Job pods (db-migrate, label app.kubernetes.io/component=migration) are exempt.
+spec:
+  background: true
+  rules:
+    - name: serving-containers-have-probes
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [shop]
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  app.kubernetes.io/component: migration
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.ownerReferences[0].kind || '' }}"
+            operator: NotEquals
+            value: Job
+      validate:
+        failureAction: Enforce
+        message: "livenessProbe, readinessProbe and startupProbe are required for serving containers."
+        foreach:
+          - list: request.object.spec.containers[]
+            deny:
+              conditions:
+                any:
+                  - key: livenessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"
+                  - key: readinessProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"
+                  - key: startupProbe
+                    operator: AllNotIn
+                    value: "{{ element.keys(@)[] }}"

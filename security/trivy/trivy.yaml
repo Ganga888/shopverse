@@ -1,0 +1,44 @@
+# Trivy configuration shared by CI image scans and IaC/config scans:
+#   trivy image  --config security/trivy/trivy.yaml <ecr>/shopverse/<svc>:<sha>
+#   trivy config --config security/trivy/trivy.yaml terraform/   (tfsec rules)
+#   trivy fs     --config security/trivy/trivy.yaml services/<svc> (dependencies + secrets)
+format: table
+exit-code: 1
+severity:
+  - HIGH
+  - CRITICAL
+timeout: 15m
+ignorefile: security/trivy/.trivyignore
+cache:
+  dir: .trivycache
+scan:
+  scanners:
+    - vuln
+    - secret
+    - misconfig
+  skip-dirs:
+    - "**/node_modules/.cache"
+    - "**/.terraform"
+    - "gitops/envs/*/apps/optional"
+  skip-files:
+    - "**/*.test.ts"
+vulnerability:
+  ignore-unfixed: true          # only fail on CVEs that have a fixed version available
+pkg:
+  types:
+    - os
+    - library
+  include-dev-deps: false
+secret:
+  config: ""                    # built-in rules (AWS keys, private keys, Slack webhooks, JWT, ...)
+misconfiguration:
+  scanners:
+    - terraform
+    - dockerfile
+    - kubernetes
+    - helm
+  terraform:
+    exclude-downloaded-modules: true
+  helm:
+    values:
+      - gitops/envs/prod/services/order-service/values.yaml

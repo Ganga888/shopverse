@@ -1,0 +1,34 @@
+- name: sshd_config includes drop-ins
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^Include /etc/ssh/sshd_config.d/\*\.conf'
+    line: Include /etc/ssh/sshd_config.d/*.conf
+    insertbefore: BOF
+
+- name: SSH hardening drop-in
+  ansible.builtin.template:
+    src: sshd_hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-shopverse-hardening.conf
+    owner: root
+    group: root
+    mode: "0600"
+  register: common_sshd_dropin
+
+- name: Validate sshd configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+  when: common_sshd_dropin is changed
+  notify: Restart sshd
+
+- name: Remove weak Diffie-Hellman moduli (< 3072 bits)
+  ansible.builtin.shell: |
+    set -o pipefail
+    if awk '$5 < 3071' /etc/ssh/moduli | grep -q .; then
+      awk '$5 >= 3071' /etc/ssh/moduli > /etc/ssh/moduli.safe && mv /etc/ssh/moduli.safe /etc/ssh/moduli
+      echo changed
+    fi
+  args:
+    executable: /bin/bash
+  register: common_moduli
+  changed_when: "'changed' in common_moduli.stdout"
+  notify: Restart sshd

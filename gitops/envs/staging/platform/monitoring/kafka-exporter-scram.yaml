@@ -1,0 +1,15 @@
+# SCRAM credentials for the MSK lag exporter (keys username/password as the chart expects).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: kafka-exporter-scram
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: aws-secrets-manager, kind: ClusterSecretStore }
+  target: { name: kafka-exporter-scram, creationPolicy: Owner }
+  data:
+    - secretKey: username
+      remoteRef: { key: AmazonMSK_shopverse_staging_app, property: username }
+    - secretKey: password
+      remoteRef: { key: AmazonMSK_shopverse_staging_app, property: password }

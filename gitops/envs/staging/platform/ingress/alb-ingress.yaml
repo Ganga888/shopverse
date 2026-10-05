@@ -1,0 +1,82 @@
+# Internet-facing ALB (AWS Load Balancer Controller) in front of ingress-nginx.
+# Client -> Route 53 -> (CloudFront+WAF for web) -> ALB (ACM TLS, regional WAF) -> ingress-nginx -> Service.
+# ExternalDNS (--ingress-class=alb) publishes the hosts below as aliases to this ALB.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopverse-alb
+  namespace: ingress-nginx
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: shopverse-staging
+    alb.ingress.kubernetes.io/load-balancer-name: shopverse-staging-alb
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # tf-output: acm_certificate_arn (covers *.staging.ganga888.in and staging.ganga888.in)
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:111122223333:certificate/00000000-0000-0000-0000-000000000051
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    # tf-output: waf_regional_acl_arn
+    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:ap-south-1:111122223333:regional/webacl/shopverse-staging-alb/00000000-0000-0000-0000-000000000052
+    alb.ingress.kubernetes.io/healthcheck-port: "10254"
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    alb.ingress.kubernetes.io/load-balancer-attributes: >-
+      idle_timeout.timeout_seconds=60,routing.http.drop_invalid_header_fields.enabled=true,routing.http2.enabled=true,deletion_protection.enabled=false
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+    alb.ingress.kubernetes.io/tags: Project=shopverse,Environment=staging,Owner=platform-team,CostCenter=shopverse,ManagedBy=terraform
+spec:
+  ingressClassName: alb
+  rules:
+    - host: api.staging.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 80
+    - host: argocd.staging.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 80
+    - host: grafana.staging.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 80
+    - host: kibana.staging.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 80
+    - host: jaeger.staging.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ingress-nginx-controller
+                port:
+                  number: 80

@@ -1,0 +1,8 @@
+# Effective ignore file for builds whose context is services/ is services/.dockerignore;
+# this copy documents the same rules for tools that build from the service directory.
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.env*
+test

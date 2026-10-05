@@ -1,0 +1,56 @@
+# What charts/microservice renders for catalog-service (callers: cart, order, recommendation, review;
+# callee: inventory; datastores: Postgres + Redis + Kafka).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: catalog-service
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: catalog-service
+      app.kubernetes.io/instance: catalog-service
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: ingress-nginx }
+      ports: [{ protocol: TCP, port: 8080 }]
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+      ports: [{ protocol: TCP, port: 8080 }]
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [cart-service, order-service, recommendation-service, review-service]
+      ports: [{ protocol: TCP, port: 8080 }]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+    - to:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [inventory-service, auth-service]
+      ports: [{ protocol: TCP, port: 8080 }]
+    - ports:
+        - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6379 }
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9094 }
+        - { protocol: TCP, port: 9096 }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: tracing }
+      ports: [{ protocol: TCP, port: 4318 }]
+    - ports: [{ protocol: TCP, port: 443 }]

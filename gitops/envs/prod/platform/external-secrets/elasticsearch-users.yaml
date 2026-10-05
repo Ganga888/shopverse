@@ -1,0 +1,120 @@
+# Elasticsearch file-realm users (least privilege roles in logging/es-roles.yaml).
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-user-fluentbit
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  refreshInterval: "0"
+  target:
+    name: es-user-fluentbit
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/basic-auth
+      engineVersion: v2
+      data:
+        username: fluentbit
+        password: "{{ .password }}"
+        roles: shopverse_log_writer
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: random-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-user-jaeger
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  refreshInterval: "0"
+  target:
+    name: es-user-jaeger
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/basic-auth
+      engineVersion: v2
+      data:
+        username: jaeger
+        password: "{{ .password }}"
+        roles: shopverse_jaeger
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: random-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-user-grafana
+  namespace: logging
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  refreshInterval: "0"
+  target:
+    name: es-user-grafana
+    creationPolicy: Owner
+    template:
+      type: kubernetes.io/basic-auth
+      engineVersion: v2
+      data:
+        username: grafana
+        password: "{{ .password }}"
+        roles: shopverse_log_reader
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: random-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-user-jaeger
+  namespace: tracing
+spec:
+  refreshInterval: 15m
+  secretStoreRef: { name: logging-secrets, kind: ClusterSecretStore }
+  target: { name: es-user-jaeger, creationPolicy: Owner }
+  data:
+    - secretKey: password
+      remoteRef: { key: es-user-jaeger, property: password }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-http-ca
+  namespace: tracing
+spec:
+  refreshInterval: 15m
+  secretStoreRef: { name: logging-secrets, kind: ClusterSecretStore }
+  target: { name: es-http-ca, creationPolicy: Owner }
+  data:
+    - secretKey: ca.crt
+      remoteRef: { key: shopverse-es-http-certs-public, property: ca.crt }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: es-user-grafana
+  namespace: monitoring
+spec:
+  refreshInterval: 15m
+  secretStoreRef: { name: logging-secrets, kind: ClusterSecretStore }
+  target: { name: es-user-grafana, creationPolicy: Owner }
+  data:
+    - secretKey: password
+      remoteRef: { key: es-user-grafana, property: password }
+    - secretKey: ca.crt
+      remoteRef: { key: shopverse-es-http-certs-public, property: ca.crt }

@@ -1,0 +1,1297 @@
+# ArgoCD Applications for the prod platform layer. Synced by gitops/bootstrap/prod-root.yaml.
+# Sync waves (Application health gates the next wave; see argocd values resource.customizations):
+#   -10 platform-base (namespaces/PSS, quotas, default-deny, StorageClass)
+#    -9 argocd (self-managed)          -8 aws-load-balancer-controller, metrics-server
+#    -7 external-secrets               -6 karpenter
+#    -5 kube-prometheus-stack (CRDs)   -4 ingress-nginx, external-dns, keda, argo-rollouts, eck-operator,
+#                                         kyverno, velero, strimzi (dev)
+#    -3 platform-config (ClusterSecretStores, NodePools, ALB Ingress, ES/Kibana, Kafka, schedules,
+#       dashboards, rules, Kyverno policies)
+#    -2 postgresql/redis (dev), kafka-exporter (staging/prod)
+#    -1 fluent-bit, jaeger, opentelemetry-collector, kubecost, blackbox-exporter
+#     0 services ApplicationSet (services-appset.yaml)
+# Lines marked "tf-output: <name>" must match the Terraform output of the same name for this env.
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/shopverse/aws-microservices.git
+    targetRevision: main
+    path: gitops/envs/prod/platform/base
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-9"
+spec:
+  project: platform
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    targetRevision: 7.8.2
+    helm:
+      releaseName: argocd
+      valuesObject:
+        global:
+          domain: argocd.ganga888.in
+        crds:
+          keep: true
+        configs:
+          params:
+            server.insecure: true            # TLS terminates at the ALB, nginx -> argocd-server over HTTP
+            application.namespaces: argocd
+          cm:
+            url: https://argocd.ganga888.in
+            application.resourceTrackingMethod: annotation
+            admin.enabled: true              # disable once SSO below is configured
+            exec.enabled: false
+            statusbadge.enabled: true
+            timeout.reconciliation: 180s
+            # --- SSO placeholder (OIDC). Create the client in your IdP, store the secret in AWS
+            # Secrets Manager and sync it with an ExternalSecret into argocd-secret (key oidc.sso.clientSecret).
+            # oidc.config: |
+            #   name: SSO
+            #   issuer: https://login.example.com/
+            #   clientID: argocd-prod
+            #   clientSecret: $oidc.sso.clientSecret
+            #   requestedScopes: ["openid", "profile", "email", "groups"]
+            resource.exclusions: |
+              - apiGroups: ["cilium.io"]
+                kinds: ["CiliumIdentity"]
+                clusters: ["*"]
+            # Application health is required for sync-wave ordering of app-of-apps.
+            resource.customizations.health.argoproj.io_Application: |
+              hs = {}
+              hs.status = "Progressing"
+              hs.message = ""
+              if obj.status ~= nil then
+                if obj.status.health ~= nil then
+                  hs.status = obj.status.health.status
+                  if obj.status.health.message ~= nil then
+                    hs.message = obj.status.health.message
+                  end
+                end
+              end
+              return hs
+            # ESO adds defaulted fields; ignore them to avoid perpetual OutOfSync.
+            resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
+              jqPathExpressions:
+                - .spec.data[]?.remoteRef.conversionStrategy
+                - .spec.data[]?.remoteRef.decodingStrategy
+                - .spec.data[]?.remoteRef.metadataPolicy
+                - .spec.dataFrom[]?.extract.conversionStrategy
+                - .spec.dataFrom[]?.extract.decodingStrategy
+                - .spec.dataFrom[]?.extract.metadataPolicy
+          rbac:
+            policy.default: role:readonly
+            policy.csv: |
+              g, platform-team, role:admin
+              p, role:developer, applications, get, */*, allow
+              p, role:developer, applications, sync, shopverse/*, allow
+              p, role:developer, applications, action/argoproj.io/Rollout/*, shopverse/*, allow
+              g, developers, role:developer
+          repositories:
+            bitnami-oci:
+              type: helm
+              name: bitnamicharts
+              url: registry-1.docker.io/bitnamicharts
+              enableOCI: "true"
+            karpenter-oci:
+              type: helm
+              name: karpenter
+              url: public.ecr.aws/karpenter
+              enableOCI: "true"
+        controller:
+          replicas: 1
+          metrics: { enabled: true, serviceMonitor: { enabled: true } }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 2Gi } }
+        server:
+          replicas: 2
+          metrics: { enabled: true, serviceMonitor: { enabled: true } }
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hostname: argocd.ganga888.in
+            annotations:
+              nginx.ingress.kubernetes.io/backend-protocol: HTTP
+        repoServer:
+          replicas: 2
+          metrics: { enabled: true, serviceMonitor: { enabled: true } }
+        applicationSet:
+          replicas: 1
+          metrics: { enabled: true, serviceMonitor: { enabled: true } }
+        redis-ha:
+          enabled: false
+        dex:
+          enabled: false
+        notifications:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: false, selfHeal: true }   # never let ArgoCD prune itself
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 5, backoff: { duration: 10s, factor: 2, maxDuration: 3m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+spec:
+  project: platform
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: 1.13.0
+    helm:
+      releaseName: aws-load-balancer-controller
+      valuesObject:
+        clusterName: shopverse-prod
+        region: ap-south-1
+        vpcId: vpc-0prod0000000000000   # tf-output: vpc_id (nodes use IMDS hop limit 1, so no IMDS discovery)
+        replicaCount: 2
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-aws-load-balancer-controller
+        enableServiceMutatorWebhook: false
+        defaultTags:
+          Project: shopverse
+          Environment: prod
+          Owner: platform-team
+          CostCenter: shopverse
+          ManagedBy: terraform
+        podDisruptionBudget: { maxUnavailable: 1 }
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+spec:
+  project: platform
+  source:
+    repoURL: https://kubernetes-sigs.github.io/metrics-server/
+    chart: metrics-server
+    targetRevision: 3.12.2
+    helm:
+      releaseName: metrics-server
+      valuesObject:
+        replicas: 2
+        podDisruptionBudget: { enabled: true, minAvailable: 1 }
+        args:
+          - --kubelet-preferred-address-types=InternalIP
+        resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-7"
+spec:
+  project: platform
+  source:
+    repoURL: https://charts.external-secrets.io
+    chart: external-secrets
+    targetRevision: 0.18.2
+    helm:
+      releaseName: external-secrets
+      valuesObject:
+        installCRDs: true
+        replicaCount: 2
+        leaderElect: true
+        serviceAccount:
+          name: external-secrets
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-external-secrets
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+        webhook:
+          replicaCount: 2
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        certController:
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+spec:
+  project: platform
+  source:
+    repoURL: public.ecr.aws/karpenter
+    chart: karpenter
+    targetRevision: 1.4.0
+    helm:
+      releaseName: karpenter
+      valuesObject:
+        settings:
+          clusterName: shopverse-prod
+          interruptionQueue: shopverse-prod-karpenter   # tf-output: karpenter_interruption_queue
+          featureGates:
+            spotToSpotConsolidation: true
+        serviceAccount:
+          name: karpenter
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-karpenter
+        replicas: 2
+        # Runs on the managed system node group (chart default affinity keeps it off Karpenter nodes)
+        controller:
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 1Gi } }
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        podDisruptionBudget: { name: karpenter, maxUnavailable: 1 }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 70.4.2
+    helm:
+      releaseName: kube-prometheus-stack
+      valuesObject:
+        fullnameOverride: kube-prometheus-stack
+        crds: { enabled: true }
+        defaultRules:
+          create: true
+          rules:
+            etcd: false
+            kubeControllerManager: false
+            kubeSchedulerAlerting: false
+            kubeSchedulerRecording: false
+            kubeProxy: false
+        kubeEtcd: { enabled: false }
+        kubeControllerManager: { enabled: false }
+        kubeScheduler: { enabled: false }
+        kubeProxy: { enabled: false }
+        prometheus:
+          prometheusSpec:
+            replicas: 2
+            retention: 15d
+            retentionSize: 90GB
+            scrapeInterval: 30s
+            evaluationInterval: 30s
+            externalLabels:
+              cluster: shopverse-prod
+              env: prod
+            # Select every ServiceMonitor/PodMonitor/PrometheusRule in the cluster.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            probeSelectorNilUsesHelmValues: false
+            enableFeatures: [exemplar-storage]
+            resources: { requests: { cpu: 500m, memory: 2Gi }, limits: { memory: 8Gi } }
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: [ReadWriteOnce]
+                  resources: { requests: { storage: 100Gi } }
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: ScheduleAnyway
+                labelSelector: { matchLabels: { app.kubernetes.io/name: prometheus } }
+        alertmanager:
+          alertmanagerSpec:
+            replicas: 2
+            # Secret rendered by the ExternalSecret alertmanager-shopverse (platform-config): template
+            # observability/alertmanager/alertmanager.yaml.tmpl + Slack/SMTP values from
+            # AWS Secrets Manager shopverse/prod/monitoring/alertmanager.
+            configSecret: alertmanager-shopverse
+            # Notification templates (observability/alertmanager/shopverse.tmpl), mounted at
+            # /etc/alertmanager/configmaps/alertmanager-templates/
+            configMaps: [alertmanager-templates]
+            externalUrl: https://grafana.ganga888.in/alerting
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: [ReadWriteOnce]
+                  resources: { requests: { storage: 5Gi } }
+            resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
+        grafana:
+          replicas: 1
+          admin:
+            existingSecret: grafana-admin       # ESO Password generator (platform-config)
+            userKey: admin-user
+            passwordKey: admin-password
+          serviceAccount:
+            annotations:
+              eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-grafana   # CloudWatch (RDS) read
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hosts: [grafana.ganga888.in]
+            path: /
+          grafana.ini:
+            server:
+              root_url: https://grafana.ganga888.in
+            analytics: { check_for_updates: false, reporting_enabled: false }
+            auth.anonymous: { enabled: false }
+            users: { allow_sign_up: false }
+          persistence: { enabled: false }       # dashboards and datasources are code
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard
+              labelValue: "1"
+              searchNamespace: ALL
+              folderAnnotation: grafana_folder
+              provider: { foldersFromFilesStructure: true }
+            datasources:
+              enabled: true
+          additionalDataSources:
+            - name: CloudWatch
+              uid: cloudwatch
+              type: cloudwatch
+              jsonData: { authType: default, defaultRegion: ap-south-1 }
+            - name: Elasticsearch-logs
+              uid: es-logs
+              type: elasticsearch
+              url: https://shopverse-es-http.logging.svc:9200
+              basicAuth: true
+              basicAuthUser: grafana
+              jsonData:
+                index: logs-k8s-*
+                timeField: "@timestamp"
+                tlsAuthWithCACert: true
+                logMessageField: message
+                logLevelField: level
+                dataLinks:
+                  - field: trace_id
+                    datasourceUid: jaeger
+                    url: "$${__value.raw}"
+              secureJsonData:
+                basicAuthPassword: $__file{/etc/secrets/es-user-grafana/password}
+                tlsCACert: $__file{/etc/secrets/es-user-grafana/ca.crt}
+            - name: Jaeger
+              uid: jaeger
+              type: jaeger
+              url: http://jaeger-query.tracing.svc:80
+              jsonData:
+                tracesToLogsV2:
+                  datasourceUid: es-logs
+                  spanStartTimeShift: "-5m"
+                  spanEndTimeShift: "5m"
+                  filterByTraceID: true
+                  customQuery: true
+                  query: 'trace_id:"$${__trace.traceId}"'
+                tracesToMetrics:
+                  datasourceUid: prometheus
+          extraSecretMounts:
+            - name: es-user-grafana
+              secretName: es-user-grafana
+              mountPath: /etc/secrets/es-user-grafana
+              readOnly: true
+        prometheus-node-exporter:
+          resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 64Mi } }
+        kube-state-metrics:
+          metricLabelsAllowlist:
+            - pods=[app.kubernetes.io/name,app.kubernetes.io/version]
+            - deployments=[app.kubernetes.io/name]
+            - nodes=[karpenter.sh/capacity-type,node.kubernetes.io/instance-type,topology.kubernetes.io/zone]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://kubernetes.github.io/ingress-nginx
+    chart: ingress-nginx
+    targetRevision: 4.12.1
+    helm:
+      releaseName: ingress-nginx
+      valuesObject:
+        controller:
+          ingressClassResource: { name: nginx, default: true }
+          # ClusterIP only: the internet-facing ALB (alb Ingress in platform-config) targets these pods by IP.
+          service:
+            type: ClusterIP
+          publishService: { enabled: false }
+          replicaCount: 2
+          autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilizationPercentage: 70 }
+          minAvailable: 1
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: { app.kubernetes.io/name: ingress-nginx, app.kubernetes.io/component: controller }
+          config:
+            use-forwarded-headers: "true"
+            compute-full-forwarded-for: "true"
+            proxy-real-ip-cidr: 10.30.0.0/16   # tf-output: vpc_cidr
+            enable-opentelemetry: "true"
+            otlp-collector-host: otel-collector.tracing.svc
+            otlp-collector-port: "4317"
+            otel-service-name: ingress-nginx
+            opentelemetry-trust-incoming-span: "true"
+            otel-sampler: AlwaysOn
+            log-format-escape-json: "true"
+            log-format-upstream: '{"time":"$time_iso8601","remote_addr":"$remote_addr","request_id":"$req_id","trace_id":"$opentelemetry_trace_id","method":"$request_method","host":"$host","uri":"$uri","status":$status,"bytes_sent":$bytes_sent,"request_time":$request_time,"upstream":"$proxy_upstream_name","upstream_status":"$upstream_status","upstream_response_time":"$upstream_response_time","user_agent":"$http_user_agent"}'
+            hsts: "false"            # set by CloudFront/ALB
+            server-tokens: "false"
+            enable-underscores-in-headers: "false"
+          metrics:
+            enabled: true
+            serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 512Mi } }
+          admissionWebhooks: { enabled: true }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://kubernetes-sigs.github.io/external-dns/
+    chart: external-dns
+    targetRevision: 1.16.1
+    helm:
+      releaseName: external-dns
+      valuesObject:
+        provider: { name: aws }
+        env:
+          - { name: AWS_DEFAULT_REGION, value: ap-south-1 }
+        serviceAccount:
+          name: external-dns
+          annotations:
+            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-external-dns
+        sources: [ingress]
+        domainFilters: [ganga888.in]
+        # One hosted zone shared by all envs: ownership via TXT owner id, so each env only touches its records.
+        policy: sync
+        registry: txt
+        txtOwnerId: shopverse-prod
+        txtPrefix: "extdns-%{record_type}-"
+        interval: 1m
+        extraArgs:
+          - --ingress-class=alb            # only the ALB Ingress (nginx Ingresses have no public address)
+          - --aws-zone-type=public
+          - --aws-batch-change-size=100
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 128Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda
+    targetRevision: 2.17.0
+    helm:
+      releaseName: keda
+      valuesObject:
+        operator: { replicaCount: 2 }
+        metricsServer: { replicaCount: 2 }
+        podDisruptionBudget:
+          operator: { minAvailable: 1 }
+          metricServer: { minAvailable: 1 }
+        prometheus:
+          operator:
+            enabled: true
+            serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          metricServer:
+            enabled: true
+            serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        resources:
+          operator: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 512Mi } }
+          metricServer: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 512Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argo-rollouts
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-rollouts
+    targetRevision: 2.39.1
+    helm:
+      releaseName: argo-rollouts
+      valuesObject:
+        installCRDs: true
+        controller:
+          replicas: 2
+          metrics:
+            enabled: true
+            serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+        # Read-only dashboard; reach it with:  kubectl -n argo-rollouts port-forward svc/argo-rollouts-dashboard 3100:3100
+        dashboard:
+          enabled: true
+          readonly: true
+          service: { type: ClusterIP }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eck-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://helm.elastic.co
+    chart: eck-operator
+    targetRevision: 2.16.1
+    helm:
+      releaseName: eck-operator
+      valuesObject:
+        installCRDs: true
+        managedNamespaces: [logging]
+        config:
+          metrics: { port: 9090 }
+        podMonitor: { enabled: true, labels: { release: kube-prometheus-stack } }
+        resources: { requests: { cpu: 100m, memory: 150Mi }, limits: { memory: 512Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: 3.3.7
+    helm:
+      releaseName: kyverno
+      valuesObject:
+        admissionController:
+          replicas: 3
+          rbac:
+            serviceAccount:
+              annotations:
+                # ECR pull + kms:GetPublicKey for cosign verification (security/kyverno)
+                eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-kyverno
+          container:
+            resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 768Mi } }
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        backgroundController:
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        cleanupController:
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        reportsController:
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        features:
+          policyExceptions: { enabled: true, namespace: kyverno }
+        config:
+          webhooks:
+            namespaceSelector:
+              matchExpressions:
+                - key: kubernetes.io/metadata.name
+                  operator: NotIn
+                  values: [kube-system, kyverno]
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: velero
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+spec:
+  project: platform
+  source:
+    repoURL: https://vmware-tanzu.github.io/helm-charts
+    chart: velero
+    targetRevision: 8.1.0
+    helm:
+      releaseName: velero
+      valuesObject:
+        initContainers:
+          - name: velero-plugin-for-aws
+            image: velero/velero-plugin-for-aws:v1.11.0
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - { mountPath: /target, name: plugins }
+        credentials:
+          useSecret: false                   # IRSA
+        serviceAccount:
+          server:
+            name: velero
+            annotations:
+              eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-prod-velero
+        configuration:
+          backupStorageLocation:
+            - name: default
+              provider: aws
+              bucket: shopverse-prod-velero
+              default: true
+              config: { region: ap-south-1 }
+          volumeSnapshotLocation:
+            - name: default
+              provider: aws
+              config: { region: ap-south-1 }
+          defaultVolumesToFsBackup: false
+        deployNodeAgent: false               # EBS snapshots only; no file-system backup
+        snapshotsEnabled: true
+        schedules: {}                        # Schedules live in gitops/envs/prod/platform/velero
+        metrics:
+          enabled: true
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          prometheusRule:
+            enabled: true
+            additionalLabels: { release: kube-prometheus-stack }
+            spec:
+              - alert: VeleroBackupFailed
+                expr: increase(velero_backup_failure_total{schedule!=""}[1h]) > 0
+                labels: { severity: critical }
+                annotations:
+                  summary: "Velero backup for schedule {{ $labels.schedule }} failed"
+                  runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/dr-restore.md
+              - alert: VeleroNoRecentBackup
+                expr: time() - velero_backup_last_successful_timestamp{schedule="daily-full"} > 90000
+                labels: { severity: warning }
+                annotations:
+                  summary: "No successful daily-full Velero backup in 25h"
+        resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 512Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: velero
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://github.com/shopverse/aws-microservices.git
+    targetRevision: main
+    path: gitops/envs/prod/platform        # kustomization.yaml
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ServerSideApply=true, SkipDryRunOnMissingResource=true]
+    retry: { limit: 15, backoff: { duration: 15s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fluent-bit
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://fluent.github.io/helm-charts
+    chart: fluent-bit
+    targetRevision: 0.48.9
+    helm:
+      releaseName: fluent-bit
+      valuesObject:
+        kind: DaemonSet
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        tolerations:
+          - operator: Exists                 # every node, including tainted system nodes
+        resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+        env:
+          - name: ES_PASSWORD
+            valueFrom: { secretKeyRef: { name: es-user-fluentbit, key: password } }
+          - name: CLUSTER_ENV
+            value: prod
+        extraVolumes:
+          - name: es-ca
+            secret: { secretName: shopverse-es-http-certs-public }
+        extraVolumeMounts:
+          - { name: es-ca, mountPath: /fluent-bit/tls, readOnly: true }
+        # Parsers mirror observability/fluent-bit/parsers.conf (source of truth).
+        config:
+          service: |
+            [SERVICE]
+                Daemon Off
+                Flush 2
+                Log_Level info
+                Parsers_File /fluent-bit/etc/parsers.conf
+                Parsers_File /fluent-bit/etc/conf/custom_parsers.conf
+                HTTP_Server On
+                HTTP_Listen 0.0.0.0
+                HTTP_Port 2020
+                Health_Check On
+                storage.path /var/fluent-bit/state/flb-storage/
+                storage.sync normal
+                storage.backlog.mem_limit 16M
+          inputs: |
+            [INPUT]
+                Name tail
+                Tag kube.*
+                Path /var/log/containers/*.log
+                Exclude_Path /var/log/containers/fluent-bit-*.log
+                multiline.parser cri, docker
+                DB /var/fluent-bit/state/flb_kube.db
+                Mem_Buf_Limit 32MB
+                Skip_Long_Lines On
+                Refresh_Interval 10
+                storage.type filesystem
+          filters: |
+            [FILTER]
+                Name kubernetes
+                Match kube.*
+                Merge_Log On
+                Merge_Log_Key app
+                Keep_Log Off
+                K8S-Logging.Parser On
+                K8S-Logging.Exclude On
+                Labels On
+                Annotations Off
+                Buffer_Size 0
+            [FILTER]
+                Name lua
+                Match kube.*
+                script /fluent-bit/scripts/shopverse.lua
+                call lift_app_fields
+            [FILTER]
+                Name modify
+                Match kube.*
+                Add env ${CLUSTER_ENV}
+                Add cluster shopverse-${CLUSTER_ENV}
+          outputs: |
+            [OUTPUT]
+                Name es
+                Match kube.*
+                Host shopverse-es-http.logging.svc
+                Port 9200
+                tls On
+                tls.verify On
+                tls.ca_file /fluent-bit/tls/ca.crt
+                HTTP_User fluentbit
+                HTTP_Passwd ${ES_PASSWORD}
+                Logstash_Format On
+                Logstash_Prefix logs-k8s
+                Logstash_DateFormat %Y.%m.%d
+                Replace_Dots On
+                Suppress_Type_Name On
+                Generate_ID On
+                Trace_Error On
+                Retry_Limit 10
+                storage.total_limit_size 1G
+          customParsers: |
+            [PARSER]
+                Name        shopverse_json
+                Format      json
+                Time_Key    time
+                Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+                Time_Keep   On
+            [PARSER]
+                Name        pino_json
+                Format      json
+                Time_Key    time
+                Time_Format %s%L
+                Time_Keep   On
+            [PARSER]
+                Name        nginx_json
+                Format      json
+                Time_Key    time
+                Time_Format %Y-%m-%dT%H:%M:%S%z
+                Time_Keep   On
+            [PARSER]
+                Name        klog
+                Format      regex
+                Regex       ^(?<level>[IWEF])(?<time>\d{4} \d{2}:\d{2}:\d{2}\.\d{6})\s+(?<pid>\d+)\s+(?<source>[^\]]+)\]\s+(?<message>.*)$
+                Time_Key    time
+                Time_Format %m%d %H:%M:%S.%L
+                Time_Keep   On
+        luaScripts:
+          shopverse.lua: |
+            -- Lift pino fields (level, msg, trace_id, span_id, correlationId) to top level for ES/Kibana.
+            local LEVELS = { [10]="trace", [20]="debug", [30]="info", [40]="warn", [50]="error", [60]="fatal" }
+            function lift_app_fields(tag, ts, record)
+              local app = record["app"]
+              if type(app) ~= "table" then return 0, ts, record end
+              for _, k in ipairs({"trace_id", "span_id", "correlationId", "msg", "service", "req_id"}) do
+                if app[k] ~= nil then record[k] = app[k] end
+              end
+              if app["msg"] ~= nil then record["message"] = app["msg"] end
+              local lvl = app["level"]
+              if type(lvl) == "number" then record["level"] = LEVELS[lvl] or tostring(lvl)
+              elseif lvl ~= nil then record["level"] = lvl end
+              return 2, ts, record
+            end
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: jaeger
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://jaegertracing.github.io/helm-charts
+    chart: jaeger
+    targetRevision: 3.4.1
+    helm:
+      releaseName: jaeger
+      valuesObject:
+        provisionDataStore: { cassandra: false, elasticsearch: false, kafka: false }
+        allInOne: { enabled: false }
+        agent: { enabled: false }
+        storage:
+          type: elasticsearch
+          elasticsearch:
+            scheme: https
+            host: shopverse-es-http.logging.svc
+            port: 9200
+            user: jaeger
+            usePassword: true
+            existingSecret: es-user-jaeger          # copied from logging ns by ExternalSecret (platform-config)
+            existingSecretKey: password
+            tls:
+              enabled: true
+              secretName: es-http-ca
+              mountPath: /es-tls/ca.crt
+              subPath: ca.crt
+              ca: /es-tls/ca.crt
+            extraEnv:
+              - { name: ES_INDEX_PREFIX, value: shopverse }
+              - { name: ES_NUM_REPLICAS, value: "1" }
+              - { name: ES_NUM_SHARDS, value: "1" }
+        collector:
+          replicaCount: 2
+          service:
+            otlp:
+              grpc: { name: otlp-grpc, port: 4317 }
+              http: { name: otlp-http, port: 4318 }
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 512Mi } }
+        query:
+          replicaCount: 1
+          serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+          ingress:
+            enabled: true
+            ingressClassName: nginx
+            hosts: [jaeger.ganga888.in]
+            annotations:
+              # Jaeger UI has no auth: basic-auth from secret ops-basic-auth (ESO Password generator)
+              nginx.ingress.kubernetes.io/auth-type: basic
+              nginx.ingress.kubernetes.io/auth-secret: ops-basic-auth
+              nginx.ingress.kubernetes.io/auth-realm: "ShopVerse ops"
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+        esIndexCleaner:
+          enabled: true
+          numberOfDays: 30
+          schedule: "55 23 * * *"
+          extraEnv:
+            - { name: INDEX_PREFIX, value: shopverse }
+        esRollover: { enabled: false }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tracing
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: opentelemetry-collector
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: 0.120.0
+    helm:
+      releaseName: opentelemetry-collector
+      valuesObject:
+        # Service name must be otel-collector.tracing (contract: OTEL_EXPORTER_OTLP_ENDPOINT)
+        fullnameOverride: otel-collector
+        mode: deployment
+        replicaCount: 2
+        image:
+          repository: otel/opentelemetry-collector-contrib
+        presets:
+          kubernetesAttributes: { enabled: true, extractAllPodLabels: false }
+        ports:
+          metrics: { enabled: true }
+          jaeger-compact: { enabled: false }
+          jaeger-thrift: { enabled: false }
+          jaeger-grpc: { enabled: false }
+          zipkin: { enabled: false }
+          promexporter:
+            enabled: true
+            containerPort: 8889
+            servicePort: 8889
+            protocol: TCP
+        serviceMonitor:
+          enabled: true
+          extraLabels: { release: kube-prometheus-stack }
+          metricsEndpoints:
+            - port: metrics
+            - port: promexporter
+        podDisruptionBudget: { enabled: true, minAvailable: 1 }
+        resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }
+        config:
+          receivers:
+            jaeger: null
+            zipkin: null
+            prometheus: null
+            otlp:
+              protocols:
+                grpc: { endpoint: "${env:MY_POD_IP}:4317" }
+                http: { endpoint: "${env:MY_POD_IP}:4318" }
+          processors:
+            memory_limiter: { check_interval: 1s, limit_percentage: 80, spike_limit_percentage: 25 }
+            batch: { send_batch_size: 1024, timeout: 5s }
+            resource:
+              attributes:
+                - { key: deployment.environment, value: prod, action: upsert }
+                - { key: k8s.cluster.name, value: shopverse-prod, action: upsert }
+          connectors:
+            spanmetrics:
+              namespace: traces.spanmetrics
+              histogram:
+                explicit:
+                  buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s]
+              dimensions:
+                - name: http.request.method
+                - name: http.response.status_code
+                - name: http.route
+                - name: messaging.destination.name
+              exemplars: { enabled: true }
+              metrics_flush_interval: 15s
+          exporters:
+            otlp/jaeger:
+              endpoint: jaeger-collector.tracing.svc:4317
+              tls: { insecure: true }
+              sending_queue: { enabled: true, num_consumers: 4, queue_size: 5000 }
+              retry_on_failure: { enabled: true }
+            prometheus:
+              endpoint: "${env:MY_POD_IP}:8889"
+              resource_to_telemetry_conversion: { enabled: true }
+              enable_open_metrics: true
+          service:
+            pipelines:
+              traces:
+                receivers: [otlp]
+                processors: [memory_limiter, k8sattributes, resource, batch]
+                exporters: [otlp/jaeger, spanmetrics]
+              metrics/spanmetrics:
+                receivers: [spanmetrics]
+                processors: [memory_limiter, batch]
+                exporters: [prometheus]
+              metrics: null
+              logs: null
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tracing
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kubecost
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://kubecost.github.io/cost-analyzer/
+    chart: cost-analyzer
+    targetRevision: 2.5.3
+    helm:
+      releaseName: kubecost
+      valuesObject:
+        global:
+          clusterId: shopverse-prod
+          # Re-use kube-prometheus-stack instead of the bundled Prometheus.
+          prometheus:
+            enabled: false
+            fqdn: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
+          grafana:
+            enabled: false
+            proxy: false
+        kubecostProductConfigs:
+          clusterName: shopverse-prod
+          currencyCode: USD
+          awsSpotDataRegion: ap-south-1
+          projectID: "111122223333"
+          labelMappingConfigs:
+            enabled: true
+            owner_label: app.kubernetes.io/part-of
+            team_label: team
+            environment_label: shopverse.io/env
+            product_label: app.kubernetes.io/name
+        prometheus:
+          server: { enabled: false }
+          nodeExporter: { enabled: false }
+          kube-state-metrics: { disabled: true }
+        serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
+        prometheusRule: { enabled: false }
+        networkCosts: { enabled: false }
+        persistentVolume: { enabled: true, size: 32Gi, storageClass: gp3 }
+        kubecostModel:
+          resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 2Gi } }
+        # Reach the UI with: kubectl -n kubecost port-forward svc/kubecost-cost-analyzer 9090
+        ingress: { enabled: false }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kubecost
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox-exporter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-blackbox-exporter
+    targetRevision: 9.4.0
+    helm:
+      releaseName: blackbox-exporter
+      valuesObject:
+        fullnameOverride: blackbox-exporter     # Probe CRs use blackbox-exporter.monitoring.svc:9115
+        config:
+          modules:
+            http_2xx:
+              prober: http
+              timeout: 10s
+              http:
+                preferred_ip_protocol: ip4
+                valid_status_codes: [200]
+                fail_if_not_ssl: true
+            # tool UIs behind auth answer 401 - still proves DNS + ALB + WAF + TLS + nginx path
+            http_2xx_or_auth:
+              prober: http
+              timeout: 10s
+              http:
+                preferred_ip_protocol: ip4
+                valid_status_codes: [200, 401, 302]
+                fail_if_not_ssl: true
+                no_follow_redirects: true
+        resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 64Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }
+---
+# ---------------- staging/prod: consumer-lag metrics for Amazon MSK ----------------
+# Exposes kafka_consumergroup_lag (same metric Strimzi's kafka-exporter provides in dev) for the
+# Kafka lag dashboard and alerts. KEDA reads lag directly from the brokers.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kafka-exporter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-kafka-exporter
+    targetRevision: 2.12.1
+    helm:
+      releaseName: kafka-exporter
+      valuesObject:
+        kafkaServer:
+          - b-1.shopverse-prod.def456.c3.kafka.ap-south-1.amazonaws.com:9096   # tf-output: msk_bootstrap_brokers (SASL/SCRAM)
+          - b-2.shopverse-prod.def456.c3.kafka.ap-south-1.amazonaws.com:9096   # tf-output: msk_bootstrap_brokers (SASL/SCRAM)
+          - b-3.shopverse-prod.def456.c3.kafka.ap-south-1.amazonaws.com:9096   # tf-output: msk_bootstrap_brokers (SASL/SCRAM)
+        tls:
+          enabled: true
+          insecureSkipTlsVerify: false
+        sasl:
+          enabled: true
+          handshake: true
+          scram:
+            enabled: true
+            mechanism: scram-sha512
+            secretName: kafka-exporter-scram   # ExternalSecret in platform/monitoring
+        prometheus:
+          serviceMonitor:
+            enabled: true
+            namespace: monitoring
+            additionalLabels: { release: kube-prometheus-stack }
+            interval: 30s
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+          seccompProfile: { type: RuntimeDefault }
+        resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 128Mi } }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    retry: { limit: 10, backoff: { duration: 10s, factor: 2, maxDuration: 5m } }

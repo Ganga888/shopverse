@@ -1,0 +1,7 @@
+# Full convergence of every managed host.
+#   ansible-playbook -i inventories/dev/hosts.yml playbooks/site.yml
+- name: Baseline hardening for all hosts
+  ansible.builtin.import_playbook: harden.yml
+
+- name: Jenkins hosts
+  ansible.builtin.import_playbook: jenkins.yml

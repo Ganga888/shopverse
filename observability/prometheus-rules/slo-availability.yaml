@@ -1,0 +1,107 @@
+# Availability SLO: 99.9% of HTTP requests (per service, 30-day window) are not 5xx.
+# Error budget = 0.1%. Multi-window, multi-burn-rate alerts (Google SRE workbook, ch. 5):
+#   page   : 2% budget in 1h (14.4x) or 5% in 6h (6x)   - both long AND short window must burn
+#   ticket : 10% budget in 3d (1x) or in 1d (3x)
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopverse-slo-availability
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: shopverse
+spec:
+  groups:
+    - name: shopverse-slo-recording
+      interval: 30s
+      rules:
+        - record: shopverse:slo_requests:rate5m
+          expr: sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[5m]))
+        - record: shopverse:slo_errors:ratio_rate5m
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[5m]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[5m]))
+        - record: shopverse:slo_errors:ratio_rate30m
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[30m]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[30m]))
+        - record: shopverse:slo_errors:ratio_rate1h
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[1h]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[1h]))
+        - record: shopverse:slo_errors:ratio_rate2h
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[2h]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[2h]))
+        - record: shopverse:slo_errors:ratio_rate6h
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[6h]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[6h]))
+        - record: shopverse:slo_errors:ratio_rate1d
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[1d]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[1d]))
+        - record: shopverse:slo_errors:ratio_rate3d
+          expr: |
+            sum by (job) (rate(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[3d]))
+            / sum by (job) (rate(http_request_duration_seconds_count{namespace="shop"}[3d]))
+        - record: shopverse:slo_errors:ratio_rate30d
+          expr: |
+            sum by (job) (increase(http_request_duration_seconds_count{namespace="shop",status=~"5.."}[30d]))
+            / sum by (job) (increase(http_request_duration_seconds_count{namespace="shop"}[30d]))
+        - record: shopverse:slo_error_budget_remaining:ratio
+          expr: 1 - (shopverse:slo_errors:ratio_rate30d / 0.001)
+    - name: shopverse-slo-alerts
+      rules:
+        - alert: SLOErrorBudgetBurnFast
+          expr: |
+            (
+              shopverse:slo_errors:ratio_rate1h > (14.4 * 0.001)
+              and
+              shopverse:slo_errors:ratio_rate5m > (14.4 * 0.001)
+            )
+            or
+            (
+              shopverse:slo_errors:ratio_rate6h > (6 * 0.001)
+              and
+              shopverse:slo_errors:ratio_rate30m > (6 * 0.001)
+            )
+          for: 2m
+          labels:
+            severity: critical
+            slo: availability-99.9
+          annotations:
+            summary: "{{ $labels.job }} is burning its 99.9% availability error budget fast"
+            description: "At this rate the 30-day error budget of {{ $labels.job }} is exhausted in < 2 days. 1h error ratio: {{ with printf `shopverse:slo_errors:ratio_rate1h{job=\"%s\"}` $labels.job | query }}{{ . | first | value | humanizePercentage }}{{ end }}."
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md
+            dashboard: /d/shopverse-red/service-red-overview?var-service={{ $labels.job }}
+        - alert: SLOErrorBudgetBurnSlow
+          expr: |
+            (
+              shopverse:slo_errors:ratio_rate1d > (3 * 0.001)
+              and
+              shopverse:slo_errors:ratio_rate2h > (3 * 0.001)
+            )
+            or
+            (
+              shopverse:slo_errors:ratio_rate3d > (1 * 0.001)
+              and
+              shopverse:slo_errors:ratio_rate6h > (1 * 0.001)
+            )
+          for: 15m
+          labels:
+            severity: warning
+            slo: availability-99.9
+          annotations:
+            summary: "{{ $labels.job }} is steadily burning its error budget"
+            description: "{{ $labels.job }} will exhaust its 30-day error budget before the window ends if this continues."
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/incident-response.md
+        - alert: SLOErrorBudgetExhausted
+          expr: shopverse:slo_error_budget_remaining:ratio < 0
+          for: 30m
+          labels:
+            severity: warning
+            slo: availability-99.9
+          annotations:
+            summary: "{{ $labels.job }} has exhausted its 30-day error budget - freeze risky deploys"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/environment-promotion.md

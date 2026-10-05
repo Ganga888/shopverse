@@ -1,0 +1,53 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "libs/common"
+    },
+    {
+      "path": "auth-service"
+    },
+    {
+      "path": "user-service"
+    },
+    {
+      "path": "catalog-service"
+    },
+    {
+      "path": "search-service"
+    },
+    {
+      "path": "inventory-service"
+    },
+    {
+      "path": "cart-service"
+    },
+    {
+      "path": "order-service"
+    },
+    {
+      "path": "payment-service"
+    },
+    {
+      "path": "shipping-service"
+    },
+    {
+      "path": "notification-service"
+    },
+    {
+      "path": "review-service"
+    },
+    {
+      "path": "promotion-service"
+    },
+    {
+      "path": "recommendation-service"
+    },
+    {
+      "path": "media-service"
+    },
+    {
+      "path": "audit-service"
+    }
+  ]
+}

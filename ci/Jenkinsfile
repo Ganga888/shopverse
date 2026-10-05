@@ -1,0 +1,241 @@
+// ShopVerse monorepo pipeline (declarative).
+// Builds only the services changed since the last successful build (libs/common or workspace root => all),
+// in parallel: npm ci -> lint -> unit tests + coverage -> SonarQube + quality gate -> npm audit ->
+// docker build -> Trivy -> Syft SBOM -> (main only) ECR push -> cosign sign/attest (AWS KMS) -> GitOps bump (dev).
+//
+// Jenkins credential IDs (configured in ci/jenkins/casc.yaml):
+//   aws-jenkins-ci   AWS credentials (ECR push + kms:Sign on alias/shopverse-cosign). Only used when
+//                    AWS_AUTH_MODE=static-keys (Jenkins outside AWS). On EC2 (terraform/ci) the
+//                    instance role provides the same permissions and no key exists.
+//   aws-account-id   secret text, AWS account ID (never hard-coded)
+//   sonarqube-token  secret text, SonarQube analysis token (SonarQube server name: "sonarqube")
+//   github-token     username/password (GitHub App/PAT) used to push the GitOps image-tag bump
+
+// AWS access: EC2 instance role by default; static keys only for a Jenkins outside AWS.
+def withCiAws(Closure body) {
+  if ((env.AWS_AUTH_MODE ?: 'instance-profile') == 'static-keys') {
+    withCredentials([aws(credentialsId: 'aws-jenkins-ci')]) { body() }
+  } else {
+    body()
+  }
+}
+
+def ALL_SERVICES = [
+  'auth-service', 'user-service', 'catalog-service', 'search-service', 'inventory-service',
+  'cart-service', 'order-service', 'payment-service', 'shipping-service', 'notification-service',
+  'review-service', 'promotion-service', 'recommendation-service', 'media-service', 'audit-service',
+]
+
+def changedServices(List all) {
+  if (params.FORCE_ALL) { return all }
+  if (params.SERVICES?.trim()) {
+    return params.SERVICES.split(',').collect { it.trim() }.findAll { all.contains(it) }
+  }
+  def base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
+  if (!base || sh(script: "git cat-file -e ${base}^{commit}", returnStatus: true) != 0) {
+    echo 'No previous successful build reachable: building every service'
+    return all
+  }
+  def files = sh(script: "git diff --name-only ${base} HEAD -- services/", returnStdout: true).trim().split('\n').findAll { it }
+  echo "Changed files since ${base}:\n${files.join('\n')}"
+  def sharedChanged = files.any { f ->
+    f.startsWith('services/libs/common/') || f in ['services/package.json', 'services/package-lock.json',
+      'services/tsconfig.base.json', 'services/eslint.config.js', 'services/.dockerignore']
+  }
+  if (sharedChanged) { return all }
+  return all.findAll { svc -> files.any { it.startsWith("services/${svc}/") } }
+}
+
+def serviceBranch(String svc) {
+  return {
+    stage("${svc}: lint & test") {
+      dir("services/${svc}") {
+        sh 'npm run lint'
+        sh 'npm test'
+      }
+    }
+    stage("${svc}: sonar") {
+      dir("services/${svc}") {
+        withSonarQubeEnv('sonarqube') {
+          sh "sonar-scanner -Dproject.settings=sonar-project.properties -Dsonar.projectVersion=${env.GIT_SHA} -Dsonar.scm.revision=${env.GIT_COMMIT}"
+        }
+        timeout(time: 10, unit: 'MINUTES') {
+          // Waits for the SonarQube webhook (configured to <jenkins>/sonarqube-webhook/) for this analysis.
+          waitForQualityGate abortPipeline: true, credentialsId: 'sonarqube-token'
+        }
+      }
+    }
+    stage("${svc}: dependency audit") {
+      dir('services') {
+        sh "npm audit --omit=dev --audit-level=high --workspace ${svc}"
+      }
+    }
+    stage("${svc}: image build & scan") {
+      def image = "${env.ECR_REGISTRY}/shopverse/${svc}:${env.GIT_SHA}"
+      sh """
+        docker build --pull -f services/${svc}/Dockerfile \
+          --label org.opencontainers.image.revision=${env.GIT_COMMIT} \
+          --label org.opencontainers.image.source=${env.GIT_URL} \
+          -t ${image} services/
+        mkdir -p reports
+        trivy image --no-progress --exit-code 1 --severity CRITICAL,HIGH --ignore-unfixed \
+          --format template --template '@/usr/local/share/trivy/templates/junit.tpl' \
+          -o reports/trivy-${svc}.xml ${image}
+        syft ${image} -o spdx-json=reports/sbom-${svc}.spdx.json
+      """
+    }
+    if (env.PUBLISH == 'true') {
+      stage("${svc}: push & sign") {
+        def repo = "${env.ECR_REGISTRY}/shopverse/${svc}"
+        sh """
+          docker push ${repo}:${env.GIT_SHA}
+          DIGEST=\$(docker inspect --format='{{index .RepoDigests 0}}' ${repo}:${env.GIT_SHA} | cut -d@ -f2)
+          cosign sign --yes --key ${env.COSIGN_KEY} \
+            -a git_sha=${env.GIT_COMMIT} -a build_url=${env.BUILD_URL} ${repo}@\${DIGEST}
+          cosign attest --yes --key ${env.COSIGN_KEY} --type spdxjson \
+            --predicate reports/sbom-${svc}.spdx.json ${repo}@\${DIGEST}
+        """
+      }
+    }
+  }
+}
+
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    ansiColor('xterm')
+    disableConcurrentBuilds(abortPrevious: true)
+    buildDiscarder(logRotator(numToKeepStr: '30', artifactNumToKeepStr: '10'))
+    timeout(time: 90, unit: 'MINUTES')
+    skipDefaultCheckout(false)
+  }
+
+  parameters {
+    booleanParam(name: 'FORCE_ALL', defaultValue: false, description: 'Build every service regardless of changes')
+    string(name: 'SERVICES', defaultValue: '', description: 'Comma-separated list overriding change detection')
+  }
+
+  environment {
+    AWS_REGION   = 'ap-south-1'
+    AWS_DEFAULT_REGION = 'ap-south-1'
+    COSIGN_KEY   = 'awskms:///alias/shopverse-cosign'
+    GITOPS_ENV   = 'dev'
+    NPM_CONFIG_CACHE = "${WORKSPACE}/.npm"
+    TRIVY_CACHE_DIR  = "${JENKINS_HOME}/.cache/trivy"
+    // Publishing (push, sign, GitOps bump) only for the main branch.
+    PUBLISH = "${env.BRANCH_NAME == 'main' ? 'true' : 'false'}"
+  }
+
+  stages {
+    stage('Guard: skip ci') {
+      steps {
+        script {
+          def msg = sh(script: 'git log -1 --pretty=%B', returnStdout: true)
+          if (msg.contains('[skip ci]')) {
+            currentBuild.result = 'NOT_BUILT'
+            currentBuild.description = 'skipped: [skip ci] commit'
+            env.SKIP_ALL = 'true'
+          }
+        }
+      }
+    }
+
+    stage('Detect changes') {
+      when { expression { env.SKIP_ALL != 'true' } }
+      steps {
+        script {
+          env.GIT_SHA = sh(script: 'git rev-parse --short=12 HEAD', returnStdout: true).trim()
+          def svcs = changedServices(ALL_SERVICES)
+          env.CHANGED_SERVICES = svcs.join(',')
+          currentBuild.description = svcs ? "services: ${env.CHANGED_SERVICES}" : 'no service changes'
+          echo "Services to build: ${env.CHANGED_SERVICES ?: '(none)'}"
+          withCredentials([string(credentialsId: 'aws-account-id', variable: 'AWS_ACCOUNT_ID')]) {
+            env.ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+          }
+        }
+      }
+    }
+
+    stage('Install workspace') {
+      when { expression { env.SKIP_ALL != 'true' && env.CHANGED_SERVICES } }
+      steps {
+        dir('services') {
+          sh 'node --version && npm --version'
+          sh 'npm ci --no-audit --no-fund'
+          sh 'npx tsc -b'          // type-checks libs/common and every service (project references)
+          sh 'npm test --workspace libs/common'
+        }
+      }
+    }
+
+    stage('ECR login') {
+      when { expression { env.SKIP_ALL != 'true' && env.CHANGED_SERVICES && env.PUBLISH == 'true' } }
+      steps {
+        script {
+          withCiAws {
+            sh 'aws sts get-caller-identity --query Arn --output text'
+            sh 'aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"'
+          }
+        }
+      }
+    }
+
+    stage('Services') {
+      when { expression { env.SKIP_ALL != 'true' && env.CHANGED_SERVICES } }
+      steps {
+        script {
+          def branches = [failFast: false]
+          env.CHANGED_SERVICES.split(',').each { svc -> branches[svc] = serviceBranch(svc) }
+          withCiAws {
+            parallel branches
+          }
+        }
+      }
+    }
+
+    stage('GitOps: bump dev image tags') {
+      when { expression { env.SKIP_ALL != 'true' && env.CHANGED_SERVICES && env.PUBLISH == 'true' } }
+      steps {
+        withCredentials([gitUsernamePassword(credentialsId: 'github-token', gitToolName: 'Default')]) {
+          sh '''#!/usr/bin/env bash
+            set -euo pipefail
+            git config user.name  "shopverse-ci"
+            git config user.email "ci@ganga888.in"
+            git fetch origin main
+            git checkout -B gitops-bump origin/main
+            for svc in ${CHANGED_SERVICES//,/ }; do
+              f="gitops/envs/${GITOPS_ENV}/services/${svc}/values.yaml"
+              if [[ ! -f "$f" ]]; then echo "missing $f" >&2; exit 1; fi
+              TAG="$GIT_SHA" yq -i '.image.tag = strenv(TAG)' "$f"
+              git add "$f"
+            done
+            if git diff --cached --quiet; then echo "tags already current"; exit 0; fi
+            git commit -m "chore(gitops): ${GITOPS_ENV} -> ${GIT_SHA} for ${CHANGED_SERVICES} [skip ci]"
+            for attempt in 1 2 3 4 5; do
+              if git push origin HEAD:main; then exit 0; fi
+              echo "push rejected (attempt $attempt), rebasing"; sleep $((attempt * 3))
+              git pull --rebase origin main
+            done
+            exit 1
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      junit allowEmptyResults: true, testResults: 'reports/trivy-*.xml'
+      archiveArtifacts allowEmptyArchive: true, artifacts: 'reports/**, services/*/coverage/lcov.info'
+      sh 'docker image prune -f --filter "until=24h" || true'
+    }
+    failure {
+      echo "Build failed for services: ${env.CHANGED_SERVICES}"
+    }
+    cleanup {
+      cleanWs(deleteDirs: true, notFailBuild: true, patterns: [[pattern: '.npm/**', type: 'EXCLUDE']])
+    }
+  }
+}

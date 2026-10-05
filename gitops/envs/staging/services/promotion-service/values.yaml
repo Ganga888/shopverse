@@ -1,0 +1,63 @@
+# promotion-service (staging) - values for charts/microservice. Release name == promotion-service, namespace shop.
+# image.tag is bumped by the promote workflow (.github) - do not edit by hand outside a PR.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+global:
+  env: staging
+  domain: staging.ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/promotion-service
+  tag: bootstrap
+replicaCount: 2
+logLevel: info
+nodeEnv: production
+resources:
+  requests:
+    cpu: 100m
+    memory: 192Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+ingress:
+  enabled: true
+  path: /api/v1/promotions
+serviceAccount:
+  irsa:
+    enabled: false
+env:
+  NODE_OPTIONS: --max-old-space-size=288
+  DB_SSL: 'true'
+externalSecrets:
+  items:
+  - name: db
+    remoteKey: shopverse/staging/rds/promotion-service
+    keys:
+      DB_HOST: host
+      DB_PORT: port
+      DB_NAME: dbname
+      DB_USER: username
+      DB_PASSWORD: password
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpread:
+  zoneWhenUnsatisfiable: ScheduleAnyway
+prometheusRule:
+  severity: warning
+networkPolicy:
+  callers:
+  - cart-service
+  - order-service
+  egressToServices: []
+  egress:
+    postgres: true
+    redis: false
+    kafka: false
+migration:
+  enabled: true

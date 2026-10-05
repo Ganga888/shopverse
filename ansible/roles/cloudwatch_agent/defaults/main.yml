@@ -1,0 +1,14 @@
+cloudwatch_agent_arch: "{{ 'arm64' if ansible_facts['architecture'] == 'aarch64' else 'amd64' }}"
+cloudwatch_agent_deb_url: "https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/{{ cloudwatch_agent_arch }}/latest/amazon-cloudwatch-agent.deb"
+cloudwatch_agent_namespace: "ShopVerse/Hosts"
+cloudwatch_agent_log_group_prefix: "/shopverse/{{ env | default('dev') }}/hosts"
+cloudwatch_agent_log_retention_days: 30
+cloudwatch_agent_metrics_interval: 60
+cloudwatch_agent_logs:
+  - { file: /var/log/syslog, group: syslog }
+  - { file: /var/log/auth.log, group: auth }
+  - { file: /var/log/audit/audit.log, group: audit }
+  - { file: /var/log/fail2ban.log, group: fail2ban }
+  - { file: /var/log/sudo.log, group: sudo }
+  - { file: /var/log/unattended-upgrades/unattended-upgrades.log, group: unattended-upgrades }
+cloudwatch_agent_extra_logs: []

@@ -1,0 +1,10 @@
+galaxy_info:
+  role_name: common
+  author: platform-team
+  description: Baseline users, SSH hardening, unattended upgrades, auditd, fail2ban, chrony, sysctl (CIS-lite)
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions: [jammy, noble]
+dependencies: []

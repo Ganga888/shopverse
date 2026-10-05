@@ -1,0 +1,81 @@
+# dev Kafka (Strimzi, KRaft, single dual-role node). Bootstrap: shopverse-kafka-kafka-bootstrap.kafka:9092
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+spec:
+  replicas: 1
+  roles: [controller, broker]
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 10Gi
+        class: gp3
+        deleteClaim: true
+        kraftMetadata: shared
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 1Gi }
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: shopverse-kafka
+  namespace: kafka
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: 3.9.0
+    metadataVersion: 3.9-IV0
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      auto.create.topics.enable: false
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+      num.partitions: 3
+  entityOperator:
+    topicOperator:
+      resources:
+        requests: { cpu: 50m, memory: 256Mi }
+        limits: { memory: 256Mi }
+    userOperator:
+      resources:
+        requests: { cpu: 50m, memory: 256Mi }
+        limits: { memory: 256Mi }
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources:
+      requests: { cpu: 50m, memory: 64Mi }
+      limits: { memory: 128Mi }
+---
+# kafka_consumergroup_lag for the Kafka lag dashboard/alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: shopverse-kafka-exporter
+  namespace: kafka
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      strimzi.io/name: shopverse-kafka-kafka-exporter
+  podMetricsEndpoints:
+    - port: tcp-prometheus
+      path: /metrics
+      interval: 30s

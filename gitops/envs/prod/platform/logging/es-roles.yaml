@@ -1,0 +1,24 @@
+# Elasticsearch role definitions (no credentials here) referenced by spec.auth.roles.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: es-roles
+  namespace: logging
+type: Opaque
+stringData:
+  roles.yml: |-
+    shopverse_log_writer:
+      cluster: [monitor, manage_index_templates, manage_ilm]
+      indices:
+        - names: ["logs-k8s-*"]
+          privileges: [create_index, create_doc, write, auto_configure, view_index_metadata]
+    shopverse_jaeger:
+      cluster: [monitor, manage_index_templates]
+      indices:
+        - names: ["shopverse-jaeger-*"]
+          privileges: [all]
+    shopverse_log_reader:
+      cluster: [monitor]
+      indices:
+        - names: ["logs-k8s-*", "shopverse-jaeger-*"]
+          privileges: [read, view_index_metadata]

@@ -1,0 +1,7 @@
+# Accepted Trivy findings. Every entry MUST have: justification, owner and an expiry (exp:YYYY-MM-DD).
+# Expired entries are ignored by Trivy, so the build fails again and the decision gets re-reviewed.
+# Format: <ID> [exp:YYYY-MM-DD]   (comments on the preceding line)
+
+# zlib minizip integer overflow - minizip is not compiled into the node:22 base image's runtime path
+# and no service unzips untrusted archives. Owner: platform-team. Debian status: will-not-fix.
+CVE-2023-45853 exp:2026-12-31

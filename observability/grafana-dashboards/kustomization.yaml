@@ -1,0 +1,24 @@
+# Dashboards-as-code. Pulled into every env by gitops/envs/<env>/platform/kustomization.yaml.
+# The kube-prometheus-stack Grafana sidecar loads every ConfigMap labelled grafana_dashboard=1
+# (searchNamespace: ALL) into the folder named by the grafana_folder annotation.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: shopverse
+  annotations:
+    grafana_folder: ShopVerse
+configMapGenerator:
+  - name: dashboard-service-red-overview
+    files: [service-red-overview.json]
+  - name: dashboard-order-saga-funnel
+    files: [order-saga-funnel.json]
+  - name: dashboard-kafka-consumer-lag
+    files: [kafka-consumer-lag.json]
+  - name: dashboard-cluster-capacity
+    files: [cluster-capacity.json]
+  - name: dashboard-rds-cloudwatch
+    files: [rds-cloudwatch.json]

@@ -1,0 +1,76 @@
+# One ArgoCD Application per directory in gitops/envs/dev/services/* (15 ShopVerse services).
+# Multi-source: chart from charts/microservice + values from this env directory ($values ref).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: shopverse-services
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/shopverse/aws-microservices.git
+        revision: main
+        directories:
+          - path: gitops/envs/dev/services/*
+  syncPolicy:
+    preserveResourcesOnDeletion: true      # deleting the AppSet never deletes running services
+  template:
+    metadata:
+      name: '{{.path.basename}}'
+      labels:
+        app.kubernetes.io/part-of: shopverse
+        shopverse.io/env: dev
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: shopverse-dev-deploys
+        notifications.argoproj.io/subscribe.on-health-degraded.slack: shopverse-dev-deploys
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: shopverse
+      sources:
+        - repoURL: https://github.com/shopverse/aws-microservices.git
+          targetRevision: main
+          path: charts/microservice
+          helm:
+            releaseName: '{{.path.basename}}'
+            valueFiles:
+              - '$values/{{.path.path}}/values.yaml'
+        - repoURL: https://github.com/shopverse/aws-microservices.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: shop
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false          # shop namespace (PSS restricted) is owned by platform-base
+          - PruneLast=true
+          - ApplyOutOfSyncOnly=true
+          - RespectIgnoreDifferences=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m
+      revisionHistoryLimit: 10
+      ignoreDifferences:
+        # Argo Rollouts injects the pod-template-hash into stable/canary Service selectors.
+        - group: ""
+          kind: Service
+          jqPathExpressions:
+            - '.spec.selector["rollouts-pod-template-hash"]'
+        # HPA/KEDA own the replica count.
+        - group: apps
+          kind: Deployment
+          jsonPointers: [/spec/replicas]
+        - group: argoproj.io
+          kind: Rollout
+          jsonPointers: [/spec/replicas]

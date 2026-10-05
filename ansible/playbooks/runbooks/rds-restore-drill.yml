@@ -1,0 +1,154 @@
+# Quarterly restore drill: restore the newest snapshot of shopverse-<env>-postgres
+# into a temporary instance, prove it is usable, record RTO, then delete it.
+#
+#   ansible-playbook playbooks/runbooks/rds-restore-drill.yml -e env=prod
+#
+# Run from a host inside the VPC (e.g. the Jenkins host or an SSM session) so the
+# private endpoint is reachable. Needs boto3 + psycopg2 on the control node and
+# rds:*/secretsmanager:GetSecretValue for the caller.
+- name: RDS restore drill
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars:
+    env: staging
+    aws_region: ap-south-1
+    source_db: "shopverse-{{ env }}-postgres"
+    drill_db: "shopverse-{{ env }}-restore-drill-{{ ansible_date_time.epoch }}"
+    drill_instance_class: db.t4g.medium
+    # A service secret whose credentials must work on the restored copy.
+    verify_service: order-service
+    verify_tables_min: 1
+    keep_instance: false   # -e keep_instance=true to investigate before cleanup
+  tasks:
+    - name: Validate env
+      ansible.builtin.assert:
+        that: env in ['staging', 'prod']
+        fail_msg: "dev uses in-cluster Postgres (no RDS)"
+
+    - name: Source instance
+      amazon.aws.rds_instance_info:
+        db_instance_identifier: "{{ source_db }}"
+        region: "{{ aws_region }}"
+      register: source
+
+    - name: Source must exist
+      ansible.builtin.assert:
+        that: source.instances | length == 1
+
+    - name: Snapshots (automated + manual)
+      amazon.aws.rds_snapshot_info:
+        db_instance_identifier: "{{ source_db }}"
+        region: "{{ aws_region }}"
+      register: snaps
+
+    - name: Pick the newest available snapshot
+      ansible.builtin.set_fact:
+        snapshot: >-
+          {{ snaps.snapshots | selectattr('status', 'equalto', 'available')
+             | sort(attribute='snapshot_create_time') | last }}
+        src: "{{ source.instances[0] }}"
+        drill_started: "{{ now(utc=true).timestamp() }}"
+
+    - name: A snapshot is available
+      ansible.builtin.assert:
+        that: snapshot is mapping and snapshot.db_snapshot_identifier is defined
+        fail_msg: "No available snapshot for {{ source_db }}"
+
+    - name: Snapshot chosen
+      ansible.builtin.debug:
+        msg: "Restoring {{ snapshot.db_snapshot_identifier }} taken {{ snapshot.snapshot_create_time }} -> {{ drill_db }}"
+
+    - name: Restore, verify, clean up
+      block:
+        - name: Restore snapshot to a temporary instance
+          amazon.aws.rds_instance:
+            id: "{{ drill_db }}"
+            state: present
+            region: "{{ aws_region }}"
+            creation_source: snapshot
+            db_snapshot_identifier: "{{ snapshot.db_snapshot_identifier }}"
+            engine: postgres
+            db_instance_class: "{{ drill_instance_class }}"
+            db_subnet_group_name: "{{ src.db_subnet_group.db_subnet_group_name }}"
+            vpc_security_group_ids: "{{ src.vpc_security_groups | map(attribute='vpc_security_group_id') | list }}"
+            db_parameter_group_name: "{{ src.db_parameter_groups[0].db_parameter_group_name }}"
+            multi_az: false
+            publicly_accessible: false
+            deletion_protection: false
+            copy_tags_to_snapshot: false
+            tags:
+              Project: shopverse
+              Environment: "{{ env }}"
+              Owner: platform-team
+              CostCenter: shopverse
+              ManagedBy: ansible
+              Purpose: restore-drill
+            wait: true
+          register: restored
+
+        - name: Endpoint
+          ansible.builtin.set_fact:
+            drill_host: "{{ restored.endpoint.address }}"
+            restore_seconds: "{{ (now(utc=true).timestamp() - drill_started | float) | int }}"
+
+        - name: TCP reachability
+          ansible.builtin.wait_for:
+            host: "{{ drill_host }}"
+            port: 5432
+            timeout: 300
+
+        - name: Service credentials (shopverse/<env>/rds/<service>)
+          ansible.builtin.set_fact:
+            svc: "{{ lookup('amazon.aws.secretsmanager_secret', 'shopverse/' ~ env ~ '/rds/' ~ verify_service, region=aws_region) | from_json }}"
+          no_log: true
+
+        - name: Connect over TLS
+          community.postgresql.postgresql_ping:
+            login_host: "{{ drill_host }}"
+            login_user: "{{ svc.username }}"
+            login_password: "{{ svc.password }}"
+            login_db: "{{ svc.dbname }}"
+            ssl_mode: require
+          register: ping
+          failed_when: not ping.is_available
+
+        - name: Schema and data present
+          community.postgresql.postgresql_query:
+            login_host: "{{ drill_host }}"
+            login_user: "{{ svc.username }}"
+            login_password: "{{ svc.password }}"
+            login_db: "{{ svc.dbname }}"
+            ssl_mode: require
+            query: |
+              SELECT
+                (SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public') AS tables,
+                (SELECT pg_size_pretty(pg_database_size(current_database())))                 AS size,
+                now()                                                                           AS checked_at
+          register: check
+
+        - name: Assert restore is usable
+          ansible.builtin.assert:
+            that: check.query_result[0].tables | int >= verify_tables_min
+            fail_msg: "Restored database {{ svc.dbname }} has no tables"
+
+        - name: Drill report
+          ansible.builtin.debug:
+            msg:
+              - "source:        {{ source_db }}"
+              - "snapshot:      {{ snapshot.db_snapshot_identifier }} ({{ snapshot.snapshot_create_time }})"
+              - "restored as:   {{ drill_db }} in {{ restore_seconds }}s (RTO for restore step)"
+              - "server:        {{ ping.server_version.full | default('n/a') }}"
+              - "{{ svc.dbname }}: {{ check.query_result[0].tables }} tables, {{ check.query_result[0].size }}"
+
+      always:
+        - name: Delete the temporary instance
+          amazon.aws.rds_instance:
+            id: "{{ drill_db }}"
+            state: absent
+            region: "{{ aws_region }}"
+            skip_final_snapshot: true
+            delete_automated_backups: true
+            wait: false
+          when: not keep_instance | bool

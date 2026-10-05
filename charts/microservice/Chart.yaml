@@ -1,0 +1,16 @@
+apiVersion: v2
+name: microservice
+description: Generic ShopVerse microservice chart (Deployment or Argo Rollout, HPA/KEDA, IRSA, ExternalSecrets, NetworkPolicy, ServiceMonitor, PrometheusRule)
+type: application
+version: 1.0.0
+appVersion: "bootstrap"
+kubeVersion: ">=1.30.0-0"
+keywords:
+  - shopverse
+  - microservice
+  - argo-rollouts
+  - keda
+maintainers:
+  - name: platform-team
+annotations:
+  shopverse.io/owner: platform-team

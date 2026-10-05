@@ -1,0 +1,41 @@
+# Guard-rails for the shop namespace (dev). Sized for 15 services at max HPA/KEDA scale + canary surge.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shop-compute
+  namespace: shop
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "24"
+    limits.memory: 40Gi
+    pods: "120"
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+    persistentvolumeclaims: "0"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: shop-defaults
+  namespace: shop
+spec:
+  limits:
+    - type: Container
+      default:            # limits applied when a container sets none
+        cpu: 500m
+        memory: 512Mi
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+      max:
+        cpu: "2"
+        memory: 2Gi
+      min:
+        cpu: 10m
+        memory: 32Mi
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: 4Gi

@@ -1,0 +1,12 @@
+{{ include "microservice.name" . }} ({{ .Values.global.env }}) deployed as a {{ include "microservice.workloadKind" . }}.
+
+In-cluster:  http://{{ include "microservice.name" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+{{- if .Values.ingress.enabled }}
+Public:      https://{{ include "microservice.ingressHost" . }}{{ .Values.ingress.path }}
+{{- end }}
+Image:       {{ include "microservice.image" . }}
+{{- if .Values.rollout.enabled }}
+
+Canary status:  kubectl argo rollouts -n {{ .Release.Namespace }} get rollout {{ include "microservice.name" . }} --watch
+Abort:          kubectl argo rollouts -n {{ .Release.Namespace }} abort {{ include "microservice.name" . }}
+{{- end }}

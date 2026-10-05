@@ -1,0 +1,307 @@
+# Contract topics (dev: 3 partitions, RF 1) + <topic>.dlq dead-letter topics.
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: users-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: users.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: users-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: users.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: catalog-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: catalog.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: catalog-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: catalog.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: orders.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: orders.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: inventory-commands
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: inventory.commands
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: inventory-commands-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: inventory.commands.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: inventory-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: inventory.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: inventory-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: inventory.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments-commands
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: payments.commands
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments-commands-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: payments.commands.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: payments.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: payments-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: payments.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: shipping-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: shipping.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: shipping-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: shipping.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: reviews-events
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: main
+spec:
+  topicName: reviews.events
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+    min.insync.replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: reviews-events-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: shopverse-kafka
+    shopverse.io/topic-type: dlq
+spec:
+  topicName: reviews.events.dlq
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 1209600000
+    cleanup.policy: delete
+    min.insync.replicas: 1

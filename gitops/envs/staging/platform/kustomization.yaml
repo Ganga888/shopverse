@@ -1,0 +1,17 @@
+# platform-config Application (sync wave -3): everything that needs the operators/CRDs from earlier waves.
+# Shared, env-independent content (dashboards, rules, alertmanager template, Kyverno policies) is pulled
+# from observability/ and security/ so there is one source of truth.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - external-secrets
+  - db-init
+  - karpenter
+  - ingress
+  - logging
+  - velero
+  - monitoring
+  - ../../../../observability/grafana-dashboards
+  - ../../../../observability/prometheus-rules
+  - ../../../../observability/alertmanager
+  - ../../../../security/kyverno

@@ -1,0 +1,15 @@
+# Checkov configuration for terraform/ (used by .github/workflows/terraform.yml).
+# Every skip carries a justification.
+framework:
+  - terraform
+download-external-modules: true
+skip-check:
+  - CKV_TF_1      # registry modules are pinned by exact version; commit-hash pinning not used
+  - CKV2_AWS_62   # S3 event notifications not required for these buckets
+  - CKV_AWS_144   # cross-region replication: only RDS is replicated (AWS Backup); buckets are rebuildable or archived
+  - CKV_AWS_18    # access logging on the logs bucket itself would recurse
+  - CKV2_AWS_5    # security groups are attached by modules / LBC at runtime
+  - CKV_AWS_338   # CloudWatch log retention < 1 year is intentional for dev/staging cost
+  - CKV_AWS_158   # CloudWatch log groups use the AWS-managed key (CMK per log group not worth the cost)
+  - CKV_AWS_86    # CloudFront standard access logging is enabled (dynamic block not resolved by checkov)
+  - CKV2_AWS_47   # Log4j rule is part of KnownBadInputs, which is enabled

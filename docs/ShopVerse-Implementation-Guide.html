@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShopVerse Implementation Guide</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono&display=swap">
+<style>
+:root{--fg:#17202B;--muted:#566273;--line:#DCE1E8;--accent:#C2410C;--soft:#FFF1E8;--code:#F3F5F8;--link:#1D5FBF}
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:var(--fg);font:15px/1.6 "IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif}
+main{max-width:920px;margin:0 auto;padding:40px 20px 80px}
+h1{font:800 34px/1.15 "Archivo","Helvetica Neue",Arial,sans-serif;margin:0 0 6px}
+h1+p{font-size:17px;color:var(--muted);margin-top:0}
+h2{font:700 23px/1.25 "Archivo","Helvetica Neue",Arial,sans-serif;margin:44px 0 10px;padding-top:14px;border-top:2px solid var(--fg)}
+h3{font:700 17px/1.3 "Archivo","Helvetica Neue",Arial,sans-serif;margin:26px 0 6px}
+a{color:var(--link)}
+code{font:13px/1.5 "IBM Plex Mono",Menlo,Consolas,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:#0F1720;color:#E6EBF1;border-radius:8px;padding:14px 16px;overflow-x:auto}
+pre code{background:none;color:inherit;padding:0;font-size:12.5px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13.5px}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{background:#F6F7F9;font-weight:600}
+blockquote{margin:16px 0;padding:10px 16px;background:var(--soft);border-left:3px solid var(--accent);border-radius:0 6px 6px 0}
+blockquote p{margin:0}
+hr{border:0;margin:28px 0}
+li{margin:3px 0}
+li.todo{list-style:none;margin-left:-20px}
+li.todo::before{content:"☐  ";font-size:15px}
+@page{size:A4;margin:14mm 12mm}
+@media print{main{padding:0;max-width:none}h2{break-after:avoid;break-before:auto}h3{break-after:avoid}pre,table,blockquote{break-inside:avoid}}
+</style></head><body><main>
+<h1 id="shopverse-implementation-guide">ShopVerse implementation guide</h1>
+<p><strong>Getting the platform from zero to live on AWS at ganga888.in, step by step.</strong></p>
+<p>This guide takes the ShopVerse repository from an empty AWS account to a running platform. Follow the phases in order. Most phases end with a <strong>Check</strong> block. Don't start the next phase until those checks pass.</p>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>What you do</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Install tools and collect accounts</td>
+<td>Laptop ready to work</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Put the code in GitHub and replace placeholders</td>
+<td>Your own repo with your account ID</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Bootstrap Terraform state</td>
+<td>S3 state bucket and lock table</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Apply the global stack and delegate DNS</td>
+<td>Route 53, ECR, OIDC roles, KMS, security services, SES</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Configure GitHub</td>
+<td>Pipelines can reach AWS with no stored keys</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Create the dev environment</td>
+<td>VPC and EKS for dev</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Copy Terraform outputs into GitOps</td>
+<td>Cluster add-ons know your real ARNs and IDs</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Bootstrap ArgoCD</td>
+<td>Every add-on and service syncs from Git</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Create the Jenkins EC2 host and connect it</td>
+<td>Images built, scanned, signed and deployed to dev</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Deploy the web app</td>
+<td>dev.ganga888.in serves the storefront</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Verify dev end to end</td>
+<td>Tests, dashboards, logs and traces checked</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Create staging</td>
+<td>Managed RDS, Redis and MSK, promoted images</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Create prod and go live</td>
+<td>ganga888.in live behind approvals and canaries</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Day-2 operations</td>
+<td>Nightly cost guard, backups, rotation, drills</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Conventions: <code>&lt;ACCOUNT_ID&gt;</code> is your 12-digit AWS account ID. <code>&lt;GH_OWNER&gt;/&lt;GH_REPO&gt;</code> is your GitHub repository. Run commands from the repository root unless a step says otherwise. Region is always <code>ap-south-1</code>.</p>
+</blockquote>
+<hr />
+<h2 id="phase-0-prerequisites">Phase 0: Prerequisites</h2>
+<h3 id="01-accounts-you-need">0.1 Accounts you need</h3>
+<ul>
+<li><strong>An AWS account with administrator access.</strong> Use it only for Phases 2–3 and break-glass. Prefer IAM Identity Center (SSO) over IAM users.</li>
+<li><strong>Access to the registrar of <code>ganga888.in</code>.</strong> You will change its name servers in Phase 3.</li>
+<li><strong>A GitHub account</strong> where you can create a repository and its environments.</li>
+<li><strong>An email inbox</strong> for budget alerts, SNS confirmations and Alertmanager.</li>
+</ul>
+<h3 id="02-tools-on-your-laptop">0.2 Tools on your laptop</h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Version</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AWS CLI</td>
+<td>v2</td>
+<td>Login, kubeconfig, secrets</td>
+</tr>
+<tr>
+<td>Terraform</td>
+<td>≥ 1.9</td>
+<td>Infrastructure</td>
+</tr>
+<tr>
+<td>kubectl</td>
+<td>1.31</td>
+<td>Cluster access</td>
+</tr>
+<tr>
+<td>Helm</td>
+<td>≥ 3.16</td>
+<td>One-time ArgoCD install</td>
+</tr>
+<tr>
+<td>Docker + Docker Compose</td>
+<td>recent</td>
+<td>Running the stack locally (optional)</td>
+</tr>
+<tr>
+<td>AWS Session Manager plugin</td>
+<td>latest</td>
+<td>Shell and Ansible access to the Jenkins EC2 host (no SSH)</td>
+</tr>
+<tr>
+<td>Node.js</td>
+<td>22</td>
+<td>Running services locally (optional)</td>
+</tr>
+<tr>
+<td>git, jq, yq</td>
+<td>any recent</td>
+<td>Scripts below</td>
+</tr>
+<tr>
+<td>Ansible (ansible-core)</td>
+<td>≥ 2.16</td>
+<td>Host hardening, runbooks</td>
+</tr>
+<tr>
+<td>k6, newman</td>
+<td>latest</td>
+<td>Load and end-to-end tests (optional locally; CI runs them too)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="03-log-in-to-aws">0.3 Log in to AWS</h3>
+<pre><code class="language-bash">aws configure sso            # or: aws configure --profile shopverse-admin
+export AWS_PROFILE=shopverse-admin
+export AWS_REGION=ap-south-1
+aws sts get-caller-identity  # note the Account value: this is &lt;ACCOUNT_ID&gt;
+</code></pre>
+<h3 id="04-optional-run-everything-locally-first">0.4 Optional: run everything locally first</h3>
+<p>This gives you a feel for the system before spending anything on AWS.</p>
+<pre><code class="language-bash">cd services
+docker compose up --build -d     # Postgres, Redis, Kafka, Jaeger, 15 services, gateway on :8080
+./scripts/e2e-smoke.sh           # register, browse, cart, checkout, CONFIRMED and CANCELLED paths
+open http://localhost:16686      # Jaeger: one checkout trace across the services
+docker compose down -v
+</code></pre>
+<hr />
+<h2 id="phase-1-put-the-code-in-github">Phase 1: Put the code in GitHub</h2>
+<h3 id="11-create-the-repository">1.1 Create the repository</h3>
+<ol>
+<li>Create an empty <strong>private</strong> repository on GitHub, for example <code>&lt;GH_OWNER&gt;/shopverse</code>.</li>
+<li>Unzip <code>shopverse-aws-microservices.zip</code> and push it:</li>
+</ol>
+<pre><code class="language-bash">unzip shopverse-aws-microservices.zip &amp;&amp; cd aws-microservices
+git init -b main &amp;&amp; git add . &amp;&amp; git commit -m &quot;ShopVerse initial import&quot;
+git remote add origin git@github.com:&lt;GH_OWNER&gt;/&lt;GH_REPO&gt;.git
+git push -u origin main
+</code></pre>
+<h3 id="12-replace-the-placeholders">1.2 Replace the placeholders</h3>
+<p>The repo ships with three placeholders. Replace all of them in one commit:</p>
+<pre><code class="language-bash">ACCOUNT_ID=&lt;ACCOUNT_ID&gt;
+GH=&lt;GH_OWNER&gt;/&lt;GH_REPO&gt;
+
+# 1. AWS account ID
+grep -rl 111122223333 --exclude-dir=.git . | xargs sed -i &quot;s/111122223333/${ACCOUNT_ID}/g&quot;
+# 2. Repository URL that ArgoCD pulls from
+grep -rl 'https://github.com/shopverse/aws-microservices.git' --exclude-dir=.git . \
+  | xargs sed -i &quot;s#https://github.com/shopverse/aws-microservices.git#https://github.com/${GH}.git#g&quot;
+# 3. Repository allowed to assume the GitHub OIDC roles
+sed -i &quot;s#OWNER/shopverse#${GH}#g&quot; terraform/global/terraform.tfvars
+
+git commit -am &quot;Set account ID and repository&quot; &amp;&amp; git push
+</code></pre>
+<p>On macOS use <code>sed -i ''</code> instead of <code>sed -i</code>.</p>
+<h3 id="13-set-your-alert-emails-and-budget">1.3 Set your alert emails and budget</h3>
+<p>Edit <code>terraform/global/terraform.tfvars</code>:</p>
+<pre><code class="language-hcl">budget_monthly_limit_usd = 500                       # whole account, USD
+budget_alert_emails      = [&quot;you@yourdomain.com&quot;]
+</code></pre>
+<p><strong>Check:</strong> <code>grep -rn 111122223333 . | wc -l</code> prints <code>0</code>.</p>
+<hr />
+<h2 id="phase-2-bootstrap-terraform-state">Phase 2: Bootstrap Terraform state</h2>
+<p>This is run <strong>once per account</strong> with local state. It creates the S3 bucket <code>shopverse-tfstate-&lt;ACCOUNT_ID&gt;</code> (versioned and KMS-encrypted) and the DynamoDB lock table <code>shopverse-terraform-locks</code>.</p>
+<pre><code class="language-bash">cd terraform/bootstrap
+terraform init
+terraform apply
+terraform output -raw backend_hcl &gt; ../backend.hcl    # real bucket name for every other stack
+cd ../.. &amp;&amp; git add terraform/backend.hcl &amp;&amp; git commit -m &quot;Backend config&quot; &amp;&amp; git push
+</code></pre>
+<p><strong>Check:</strong> <code>aws s3 ls | grep shopverse-tfstate</code> shows the bucket.</p>
+<hr />
+<h2 id="phase-3-global-stack-and-dns">Phase 3: Global stack and DNS</h2>
+<p>The global stack holds the account-wide pieces:</p>
+<ul>
+<li>the Route 53 hosted zone for ganga888.in</li>
+<li>15 ECR repositories</li>
+<li>the GitHub OIDC provider and its CI roles</li>
+<li>the cosign KMS signing key and the <code>shopverse-jenkins-ci</code> IAM policy (ECR push and signing), which the Jenkins EC2 role uses in Phase 8</li>
+<li>CloudTrail, GuardDuty and Security Hub</li>
+<li>Budgets and Cost Anomaly Detection</li>
+<li>the CloudFront certificate in us-east-1</li>
+<li>the SES email domain</li>
+</ul>
+<h3 id="31-apply">3.1 Apply</h3>
+<pre><code class="language-bash">cd terraform/global
+terraform init -backend-config=../backend.hcl
+terraform plan -out=global.tfplan      # read it: roughly 100+ resources, all new
+terraform apply global.tfplan
+terraform output route53_name_servers
+</code></pre>
+<h3 id="32-delegate-ganga888in-to-route-53">3.2 Delegate ganga888.in to Route 53</h3>
+<ol>
+<li>At your registrar, replace the name servers of <code>ganga888.in</code> with the <strong>four</strong> values printed above.</li>
+<li>Wait for propagation. It is usually under an hour, but can take up to 48 hours.</li>
+</ol>
+<pre><code class="language-bash">dig +short NS ganga888.in          # must list the four awsdns-* servers
+</code></pre>
+<p>The CloudFront certificate and the SES domain verify automatically once delegation is live. If the first apply timed out waiting for certificate validation, run <code>terraform apply</code> again after <code>dig</code> shows the new servers.</p>
+<h3 id="33-one-time-console-tasks">3.3 One-time console tasks</h3>
+<ul>
+<li><strong>Confirm the SNS email subscriptions</strong> for budget and anomaly alerts. AWS sends one email per address.</li>
+<li><strong>Activate the cost allocation tags</strong> <code>Project</code>, <code>Environment</code> and <code>CostCenter</code> in Billing → Cost allocation tags. Per-environment budgets filter on them.</li>
+<li><strong>Request SES production access</strong> in the SES console under Account dashboard → Request production access. Until AWS approves it, SES sends only to verified addresses (sandbox mode).</li>
+</ul>
+<p><strong>Check:</strong></p>
+<ul>
+<li><code>aws ecr describe-repositories --query 'repositories[].repositoryName'</code> lists the 15 <code>shopverse/*</code> repos.</li>
+<li>In the ACM console (us-east-1), the CloudFront certificate shows <strong>Issued</strong>.</li>
+</ul>
+<hr />
+<h2 id="phase-4-configure-github">Phase 4: Configure GitHub</h2>
+<h3 id="41-repository-variable">4.1 Repository variable</h3>
+<p>Go to Settings → Secrets and variables → Actions → <strong>Variables</strong> and add:</p>
+<ul>
+<li><code>AWS_ACCOUNT_ID</code> = <code>&lt;ACCOUNT_ID&gt;</code></li>
+</ul>
+<p>No AWS keys go into GitHub. Every workflow assumes a role through OIDC.</p>
+<h3 id="42-environments">4.2 Environments</h3>
+<p>Under Settings → Environments, create <code>global</code>, <code>dev</code>, <code>staging</code> and <code>prod</code>.</p>
+<ul>
+<li>On <strong>prod</strong>, add yourself as a <strong>required reviewer</strong> and limit deployment branches to <code>main</code>.</li>
+<li>On <strong>global</strong>, adding a required reviewer is also recommended.</li>
+</ul>
+<h3 id="43-protect-main">4.3 Protect main</h3>
+<p>Add a branch protection rule for <code>main</code>:</p>
+<ul>
+<li>Require a pull request.</li>
+<li>Require these status checks to pass: <code>terraform.yml</code> (fmt, tflint, tfsec, Checkov, plan) and the Jenkins check, once Jenkins is connected.</li>
+</ul>
+<p><strong>Check:</strong> open a pull request that only adds a comment to <code>terraform/envs/dev/terraform.tfvars</code>. The <strong>terraform</strong> workflow posts a plan comment on it. Close the PR without merging.</p>
+<hr />
+<h2 id="phase-5-create-the-dev-environment">Phase 5: Create the dev environment</h2>
+<h3 id="51-give-yourself-kubectl-access">5.1 Give yourself kubectl access</h3>
+<p>EKS uses access entries. Add your admin or SSO role in <code>terraform/envs/dev/terraform.tfvars</code>:</p>
+<pre><code class="language-hcl">cluster_admin_role_arns      = [&quot;arn:aws:iam::&lt;ACCOUNT_ID&gt;:role/&lt;your-admin-or-sso-role&gt;&quot;]
+endpoint_public_access_cidrs = [&quot;&lt;your-public-ip&gt;/32&quot;]   # tighten from 0.0.0.0/0
+</code></pre>
+<p>Dev runs <code>use_managed_data = false</code>. That means Postgres, Redis and Kafka run as pods in the cluster, which saves about $300 a month.</p>
+<h3 id="52-apply-through-a-pull-request">5.2 Apply through a pull request</h3>
+<ol>
+<li>Create a branch, commit the tfvars change and open a PR.</li>
+<li>Read the plan comment, then merge.</li>
+<li>GitHub Actions applies <code>global</code>, then <code>dev</code>. Creating EKS takes roughly 15–20 minutes.</li>
+</ol>
+<p>To apply by hand instead:</p>
+<pre><code class="language-bash">cd terraform/envs/dev
+terraform init -backend-config=../../backend.hcl &amp;&amp; terraform apply
+</code></pre>
+<h3 id="53-connect-kubectl">5.3 Connect kubectl</h3>
+<pre><code class="language-bash">aws eks update-kubeconfig --name shopverse-dev --region ap-south-1
+kubectl get nodes        # 2 system nodes, Ready
+</code></pre>
+<p><strong>Check:</strong> <code>terraform -chdir=terraform/envs/dev output</code> prints <code>cluster_name</code>, <code>vpc_id</code>, <code>acm_certificate_arn</code>, <code>waf_regional_acl_arn</code> and <code>irsa_role_arns</code>.</p>
+<hr />
+<h2 id="phase-6-copy-terraform-outputs-into-gitops">Phase 6: Copy Terraform outputs into GitOps</h2>
+<p>The add-ons need a few real IDs. Each place is marked <code># tf-output: &lt;name&gt;</code> in <code>gitops/</code>. Find them all with <code>grep -rn "tf-output" gitops/envs/dev</code>.</p>
+<pre><code class="language-bash">cd terraform/envs/dev &amp;&amp; terraform output -json &gt; /tmp/dev-out.json &amp;&amp; cd -
+jq -r '.vpc_id.value, .vpc_cidr.value, .acm_certificate_arn.value, .waf_regional_acl_arn.value,
+       .karpenter_node_role_name.value, .karpenter_interruption_queue.value' /tmp/dev-out.json
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Placeholder</th>
+<th>Terraform output</th>
+<th>File</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vpcId</code> (AWS Load Balancer Controller)</td>
+<td><code>vpc_id</code></td>
+<td><code>gitops/envs/dev/apps/platform.yaml</code></td>
+</tr>
+<tr>
+<td><code>proxy-real-ip-cidr</code> (ingress-nginx)</td>
+<td><code>vpc_cidr</code></td>
+<td><code>gitops/envs/dev/apps/platform.yaml</code></td>
+</tr>
+<tr>
+<td><code>interruptionQueue</code> (Karpenter)</td>
+<td><code>karpenter_interruption_queue</code></td>
+<td><code>gitops/envs/dev/apps/platform.yaml</code></td>
+</tr>
+<tr>
+<td><code>certificate-arn</code> annotation</td>
+<td><code>acm_certificate_arn</code></td>
+<td><code>gitops/envs/dev/platform/ingress/alb-ingress.yaml</code></td>
+</tr>
+<tr>
+<td><code>wafv2-acl-arn</code> annotation</td>
+<td><code>waf_regional_acl_arn</code></td>
+<td><code>gitops/envs/dev/platform/ingress/alb-ingress.yaml</code></td>
+</tr>
+<tr>
+<td><code>role</code> (EC2NodeClass)</td>
+<td><code>karpenter_node_role_name</code></td>
+<td><code>gitops/envs/dev/platform/karpenter/ec2nodeclass.yaml</code></td>
+</tr>
+</tbody>
+</table>
+<p>The IRSA role ARNs already follow the <code>shopverse-dev-&lt;name&gt;</code> pattern, so Phase 1.2 fixed them. Commit and push:</p>
+<pre><code class="language-bash">git commit -am &quot;dev: wire Terraform outputs into GitOps&quot; &amp;&amp; git push
+</code></pre>
+<p><strong>Check:</strong> <code>grep -rn "vpc-0dev0000000000000\|00000000-0000" gitops/envs/dev</code> prints nothing.</p>
+<hr />
+<h2 id="phase-7-bootstrap-argocd">Phase 7: Bootstrap ArgoCD</h2>
+<p>You install ArgoCD by hand once. After that, ArgoCD manages itself and everything else from Git. On weekday mornings the nightly workflow repeats exactly this step.</p>
+<pre><code class="language-bash">helm repo add argo https://argoproj.github.io/argo-helm &amp;&amp; helm repo update
+helm upgrade --install argocd argo/argo-cd --namespace argocd --create-namespace \
+  --version 7.8.2 \
+  --set 'global.tolerations[0].key=CriticalAddonsOnly' \
+  --set 'global.tolerations[0].operator=Exists' \
+  --set 'configs.params.server\.insecure=true' \
+  --set 'global.domain=argocd.dev.ganga888.in' \
+  --wait --timeout 10m
+
+kubectl apply -n argocd -f gitops/bootstrap/dev-root.yaml
+</code></pre>
+<h3 id="71-watch-the-platform-come-up">7.1 Watch the platform come up</h3>
+<p>Sync waves install things in this order:</p>
+<ol>
+<li>CRDs and operators</li>
+<li>Karpenter, External Secrets, the ALB controller and ExternalDNS</li>
+<li>The ingress, monitoring, logging and tracing stacks</li>
+<li>The in-cluster data stores</li>
+<li>The 15 services</li>
+</ol>
+<pre><code class="language-bash">kubectl -n argocd get applications -w
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+</code></pre>
+<p>After about 10 minutes, ExternalDNS creates <code>api.dev.ganga888.in</code>, <code>argocd.dev.ganga888.in</code>, <code>grafana.dev.ganga888.in</code>, <code>kibana.dev.ganga888.in</code> and <code>jaeger.dev.ganga888.in</code>. All of them point at the ALB.</p>
+<p>The services stay in <code>ImagePullBackOff</code> at this point. Their tag is <code>bootstrap</code> until Jenkins pushes real images in Phase 8. That is expected.</p>
+<p><strong>Check:</strong></p>
+<ul>
+<li>Every platform application in ArgoCD is <strong>Synced / Healthy</strong>.</li>
+<li><code>kubectl get externalsecrets -A</code> shows every entry as <code>SecretSynced</code>.</li>
+<li><code>kubectl get nodepools</code> shows the Karpenter pools.</li>
+<li><code>https://argocd.dev.ganga888.in</code> loads with a valid certificate.</li>
+</ul>
+<hr />
+<h2 id="phase-8-jenkins-and-sonarqube-on-ec2">Phase 8: Jenkins and SonarQube on EC2</h2>
+<p>Jenkins and SonarQube run together on one EC2 instance, created by <code>terraform/ci</code>:</p>
+<ul>
+<li>The instance sits in its own small CI VPC (<code>10.50.0.0/16</code>), so the nightly dev destroy never touches it.</li>
+<li>It is reachable only through an ALB at <code>https://jenkins.ganga888.in</code> and <code>https://sonarqube.ganga888.in</code>, and only from your IP. GitHub can reach the webhook path and nothing else.</li>
+<li>There is no SSH port. You and Ansible connect through SSM Session Manager.</li>
+<li>The instance role grants ECR push and cosign signing, so <strong>no AWS access keys exist anywhere</strong>.</li>
+<li>Jenkins home and SonarQube data sit on an encrypted EBS volume that is snapshotted every day.</li>
+</ul>
+<h3 id="81-create-the-jenkins-host">8.1 Create the Jenkins host</h3>
+<p>Set your IP in <code>terraform/ci/terraform.tfvars</code> (up to 4 CIDRs):</p>
+<pre><code class="language-hcl">admin_cidrs           = [&quot;&lt;your-public-ip&gt;/32&quot;]
+instance_type         = &quot;t3.xlarge&quot;   # 4 vCPU / 16 GiB: Jenkins + SonarQube + parallel builds
+office_hours_schedule = false         # true = stop 21:00-08:00 IST and weekends (~60% cheaper)
+</code></pre>
+<p>Apply it through a PR (the <code>apply-ci</code> job runs right after <code>global</code>), or by hand:</p>
+<pre><code class="language-bash">cd terraform/ci
+terraform init -backend-config=../backend.hcl &amp;&amp; terraform apply
+terraform output        # jenkins_url, sonarqube_url, instance_id, ssm_bucket, secret_name
+</code></pre>
+<h3 id="82-put-the-github-token-in-secrets-manager">8.2 Put the GitHub token in Secrets Manager</h3>
+<p>Terraform already created <code>shopverse/ci/jenkins</code> with a random admin password and a random SonarQube DB password. Add a GitHub fine-grained token with <strong>Contents: Read and write</strong> on the repo. Jenkins uses it to check out code and commit image-tag bumps.</p>
+<pre><code class="language-bash">aws secretsmanager get-secret-value --secret-id shopverse/ci/jenkins --query SecretString --output text &gt; /tmp/j.json
+#   edit /tmp/j.json: &quot;GITHUB_TOKEN&quot;: &quot;&lt;token&gt;&quot;   (leave SONAR_TOKEN for 8.4)
+aws secretsmanager put-secret-value --secret-id shopverse/ci/jenkins --secret-string file:///tmp/j.json &amp;&amp; rm /tmp/j.json
+</code></pre>
+<h3 id="83-configure-the-host-with-ansible-over-ssm">8.3 Configure the host with Ansible (over SSM)</h3>
+<p>On your laptop, install the <a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html">Session Manager plugin</a> and <code>pip install boto3 botocore</code>.</p>
+<p>Fill in two files from <code>terraform -chdir=terraform/ci output</code>:</p>
+<ul>
+<li><code>ansible/inventories/ci/hosts.yml</code>: <code>ansible_host</code> comes from <code>instance_id</code>, and <code>ansible_aws_ssm_bucket_name</code> from <code>ssm_bucket</code>.</li>
+<li><code>ansible/inventories/ci/group_vars/all.yml</code>: <code>aws_account_id</code>, <code>github_owner</code> and <code>github_repo</code>.</li>
+</ul>
+<p>Then run the playbook:</p>
+<pre><code class="language-bash">cd ansible
+ansible-galaxy collection install -r requirements.yml
+ansible-playbook -i inventories/ci/hosts.yml playbooks/jenkins.yml
+</code></pre>
+<p>The playbook does the following:</p>
+<ul>
+<li>Hardens the OS: users, SSH config, auditd, fail2ban, unattended upgrades.</li>
+<li>Installs Docker, node_exporter and the CloudWatch agent.</li>
+<li>Copies <code>ci/jenkins</code> to <code>/opt/jenkins</code> and writes the non-secret <code>.env</code>.</li>
+<li>Has the host itself write <code>.env.secrets</code> from Secrets Manager using its instance role. The secrets never pass through your laptop.</li>
+<li>Builds the Jenkins image and starts Jenkins, SonarQube and its database.</li>
+</ul>
+<h3 id="84-connect-sonarqube-and-github">8.4 Connect SonarQube and GitHub</h3>
+<ol>
+<li><strong>Log in to Jenkins.</strong> Open <code>https://jenkins.ganga888.in</code> and log in as <code>admin</code>. To get the password, run <code>terraform -chdir=terraform/ci output -raw jenkins_admin_password_command | bash</code>.</li>
+<li><strong>Set up SonarQube.</strong></li>
+<li>Open <code>https://sonarqube.ganga888.in</code>, log in with <code>admin</code> / <code>admin</code>, then change the password.</li>
+<li>Create a token and store it in the secret as <code>SONAR_TOKEN</code> (same steps as 8.2).</li>
+<li>Add the webhook <code>http://jenkins:8080/sonarqube-webhook/</code>.</li>
+<li>Create the quality gate described in <code>ci/sonar/</code>.</li>
+<li><strong>Load the token into Jenkins.</strong> Run <code>ansible-playbook -i inventories/ci/hosts.yml playbooks/jenkins.yml --tags jenkins</code>.</li>
+<li><strong>Add the GitHub webhook.</strong> In GitHub, go to repo Settings → Webhooks and add <code>https://jenkins.ganga888.in/github-webhook/</code> (content type <code>application/json</code>, push and pull request events). Jenkins also scans every 5 minutes as a fallback.</li>
+</ol>
+<h3 id="85-first-build">8.5 First build</h3>
+<ol>
+<li>In Jenkins, open the <code>shopverse</code> job, which JCasC already created, and click <strong>Scan Repository Now</strong>.</li>
+<li>On <code>main</code>, the first build compiles all 15 services in parallel. Each one goes through tests, the Sonar gate, <code>npm audit</code>, the Docker build, Trivy, the SBOM, the ECR push and the cosign signature.</li>
+<li>The <strong>ECR login</strong> stage prints the instance role ARN (<code>shopverse-ci-jenkins</code>). That shows no keys are in use.</li>
+<li>Jenkins then commits the new tags to <code>gitops/envs/dev/services/*/values.yaml</code> with <code>[skip ci]</code>.</li>
+<li>ArgoCD deploys them within about 3 minutes.</li>
+</ol>
+<p><strong>Check:</strong></p>
+<pre><code class="language-bash">aws ecr list-images --repository-name shopverse/order-service
+cosign verify --key awskms:///alias/shopverse-cosign \
+  &lt;ACCOUNT_ID&gt;.dkr.ecr.ap-south-1.amazonaws.com/shopverse/order-service:&lt;tag&gt;
+kubectl -n shop get pods            # all Running, 2/2 replicas each
+</code></pre>
+<hr />
+<h2 id="phase-9-deploy-the-web-app">Phase 9: Deploy the web app</h2>
+<ol>
+<li>Go to Actions → <strong>web-deploy</strong> → Run workflow, and choose environment <code>dev</code>.</li>
+<li>The workflow builds <code>web/</code>, syncs it to <code>shopverse-dev-web</code> and invalidates CloudFront.</li>
+</ol>
+<p>Later pushes that touch <code>web/**</code> deploy automatically.</p>
+<p><strong>Check:</strong> <code>https://dev.ganga888.in</code> lists products. In the browser network tab, <code>/api/v1/products</code> returns 200.</p>
+<hr />
+<h2 id="phase-10-verify-dev-end-to-end">Phase 10: Verify dev end to end</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>How</th>
+<th>Expect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Health</td>
+<td><code>curl https://api.dev.ganga888.in/api/v1/products</code></td>
+<td>JSON list</td>
+</tr>
+<tr>
+<td>Functional e2e</td>
+<td>Actions → <strong>newman-e2e</strong> → <code>dev</code></td>
+<td>All assertions pass; happy order CONFIRMED, <code>tok_fail</code> order CANCELLED</td>
+</tr>
+<tr>
+<td>Load and autoscaling</td>
+<td><code>k6 run -e BASE_URL=https://api.dev.ganga888.in tests/k6/load.js</code></td>
+<td>p95 &lt; 500 ms, errors &lt; 1%; <code>kubectl get hpa -n shop</code> scales up, Karpenter adds nodes</td>
+</tr>
+<tr>
+<td>Metrics</td>
+<td><code>https://grafana.dev.ganga888.in</code> → ShopVerse dashboards</td>
+<td>Request rate, error rate and latency per service; saga funnel; Kafka lag</td>
+</tr>
+<tr>
+<td>Logs</td>
+<td><code>https://kibana.dev.ganga888.in</code> → search <code>trace_id:&lt;id&gt;</code></td>
+<td>Log lines from every service in one checkout</td>
+</tr>
+<tr>
+<td>Traces</td>
+<td><code>https://jaeger.dev.ganga888.in</code> → service <code>order-service</code></td>
+<td>One trace spanning about 11 services</td>
+</tr>
+<tr>
+<td>Policies</td>
+<td><code>kubectl run test --image=nginx -n shop</code></td>
+<td>Rejected by Kyverno: unsigned image / registry not allowed (dev runs in Audit mode, so it shows as a policy report instead)</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td><code>kubectl -n shop get secret order-service-db -o yaml</code></td>
+<td>Populated from Secrets Manager; nothing in Git</td>
+</tr>
+</tbody>
+</table>
+<p>The dev environment is complete at this point. From now on it is destroyed at 20:00 IST and recreated at 08:00 IST on weekdays (Phase 13.1).</p>
+<hr />
+<h2 id="phase-11-staging">Phase 11: Staging</h2>
+<p>Staging uses managed data services: RDS PostgreSQL, ElastiCache Redis and MSK Kafka with SASL/SCRAM.</p>
+<ol>
+<li><strong>Review the tfvars.</strong> In <code>terraform/envs/staging/terraform.tfvars</code>, set <code>cluster_admin_role_arns</code> and tighten <code>endpoint_public_access_cidrs</code>, as in Phase 5.1.</li>
+<li><strong>Apply</strong> through a PR and merge. Staging applies automatically after dev. RDS and MSK take 20–30 minutes.</li>
+<li><strong>Fill the GitOps placeholders</strong> as in Phase 6, for <code>gitops/envs/staging</code>. There are two extra outputs:
+   - <code>msk_bootstrap_brokers</code>: the three <code>:9096</code> brokers for kafka-exporter in <code>apps/platform.yaml</code>.
+   - <code>rds_master_secret_arn</code>: two lines in <code>platform/db-init/db-init.yaml</code>.</li>
+<li><strong>Bootstrap ArgoCD</strong> as in Phase 7, with <code>global.domain=argocd.staging.ganga888.in</code> and <code>gitops/bootstrap/staging-root.yaml</code>.</li>
+<li><strong>Check the db-init Job.</strong> It creates one role and one database per service on RDS:
+   <code>kubectl -n db-admin logs job/db-init</code> ends with <code>db-init complete</code>.</li>
+<li><strong>Promote images.</strong> Run Actions → <strong>promote</strong> with <code>from_env=dev</code> and <code>to_env=staging</code> for each service. Each run opens a PR that copies the tested tag. Merge the PRs.
+   - order-service, payment-service and catalog-service roll out as canaries: 20%, then 50%, then 100%.
+   - Watch a canary with <code>kubectl argo rollouts get rollout order-service -n shop -w</code>.</li>
+<li><strong>Deploy and test.</strong> Run <strong>web-deploy</strong> and <strong>newman-e2e</strong> for <code>staging</code>, then the k6 load test against <code>https://api.staging.ganga888.in</code>.</li>
+</ol>
+<p><strong>Check:</strong></p>
+<ul>
+<li>Grafana shows Kafka lag near 0.</li>
+<li><code>kubectl -n shop get scaledobjects</code> shows READY True. KEDA is authenticating to MSK.</li>
+</ul>
+<hr />
+<h2 id="phase-12-production-and-go-live">Phase 12: Production and go-live</h2>
+<h3 id="121-before-the-first-prod-apply">12.1 Before the first prod apply</h3>
+<ul>
+<li><strong>Review <code>terraform/envs/prod/terraform.tfvars</code>.</strong> It sets 3 AZs, 3 NAT gateways, a Multi-AZ RDS on <code>db.r6g.large</code> with PITR, Redis with a primary and 2 replicas, and 3 MSK brokers on <code>kafka.m5.large</code>.</li>
+<li><strong>Check service quotas</strong> in ap-south-1: EC2 vCPUs (On-Demand and Spot), Elastic IPs (at least 3) and VPCs.</li>
+<li><strong>Price it.</strong> Expect roughly $1,800–3,000 a month before Savings Plans. Raise <code>budget_monthly_limit_usd</code> to match.</li>
+</ul>
+<h3 id="122-apply-prod">12.2 Apply prod</h3>
+<ol>
+<li>Merge the PR. The prod job pauses at the <strong>prod</strong> environment until a required reviewer approves it.</li>
+<li>Fill the placeholders in <code>gitops/envs/prod</code>, as in Phase 11.3.</li>
+<li>Bootstrap ArgoCD with <code>gitops/bootstrap/prod-root.yaml</code> and <code>global.domain=argocd.ganga888.in</code>.</li>
+</ol>
+<h3 id="123-set-the-real-secrets">12.3 Set the real secrets</h3>
+<p>Terraform creates these as placeholders and never overwrites them afterwards:</p>
+<pre><code class="language-bash">aws secretsmanager put-secret-value --secret-id shopverse/prod/payment/gateway \
+  --secret-string '{&quot;api_key&quot;:&quot;&lt;real payment gateway key&gt;&quot;}'
+aws secretsmanager put-secret-value --secret-id shopverse/prod/monitoring/alertmanager \
+  --secret-string '{&quot;slack_webhook_url&quot;:&quot;https://hooks.slack.com/services/...&quot;,&quot;smtp_username&quot;:&quot;...&quot;,&quot;smtp_password&quot;:&quot;...&quot;,&quot;email_to&quot;:&quot;oncall@ganga888.in&quot;}'
+</code></pre>
+<p>External Secrets refreshes them within an hour. To refresh at once, run <code>kubectl annotate externalsecret --all -n shop force-sync=$(date +%s) --overwrite</code>.</p>
+<h3 id="124-promote-and-go-live">12.4 Promote and go live</h3>
+<ol>
+<li>Promote every service from <code>staging</code> to <code>prod</code> with the <strong>promote</strong> workflow. Prod PRs need your approval.</li>
+<li>Run <strong>web-deploy</strong> with <code>prod</code>.</li>
+<li>Run <strong>newman-e2e</strong> with <code>prod</code>, using the test card <code>tok_fail</code> only for the cancel path.</li>
+</ol>
+<h3 id="125-go-live-checklist">12.5 Go-live checklist</h3>
+<ul>
+<li class="todo"><code>https://ganga888.in</code> and <code>https://www.ganga888.in</code> serve the storefront through CloudFront. <code>https://api.ganga888.in</code> answers.</li>
+<li class="todo">Every ArgoCD app is Synced and Healthy. No Kyverno policy violations (Enforce mode in prod).</li>
+<li class="todo">RDS is Multi-AZ, automated backups are on, and AWS Backup has a cross-region copy job.</li>
+<li class="todo"><code>velero get schedules</code> shows the daily and hourly schedules. The first backup has completed.</li>
+<li class="todo">A test alert reaches Slack and email (<code>amtool</code> or a firing test rule).</li>
+<li class="todo">Budgets and anomaly alerts are confirmed. GuardDuty and Security Hub show no high findings.</li>
+<li class="todo">The SES domain is verified and production access is granted. A test order email arrives.</li>
+<li class="todo">A rollback was rehearsed: revert the last tag commit and watch ArgoCD roll back.</li>
+</ul>
+<hr />
+<h2 id="phase-13-day-2-operations">Phase 13: Day-2 operations</h2>
+<h3 id="131-nightly-cost-guard-for-dev">13.1 Nightly cost guard for dev</h3>
+<p><code>.github/workflows/nightly-dev.yml</code> runs on this schedule:</p>
+<ul>
+<li><strong>20:00 IST daily:</strong> scales ArgoCD to zero, deletes the ALB ingresses, NodePools and PVCs, then destroys EKS, the NAT gateway and the Elastic IPs.</li>
+<li><strong>08:00 IST, Monday to Friday:</strong> recreates the cluster and repeats Phase 7 automatically.</li>
+</ul>
+<p>Run either job on demand from Actions with <code>workflow_dispatch</code>.</p>
+<h3 id="132-backups-and-disaster-recovery">13.2 Backups and disaster recovery</h3>
+<ul>
+<li><strong>Targets:</strong> RTO 1 hour and RPO 15 minutes in prod. See <code>docs/runbooks/dr-restore.md</code>.</li>
+<li><strong>Quarterly drill:</strong> <code>ansible-playbook ansible/playbooks/runbooks/rds-restore-drill.yml -e env=prod</code>. It restores the latest snapshot to a temporary instance, checks it and deletes it.</li>
+</ul>
+<h3 id="133-look-after-the-jenkins-host">13.3 Look after the Jenkins host</h3>
+<ul>
+<li><strong>Shell access:</strong> <code>aws ssm start-session --target &lt;instance_id&gt;</code>. Port 22 is closed.</li>
+<li><strong>OS patches and config drift:</strong> re-run <code>ansible-playbook -i inventories/ci/hosts.yml playbooks/jenkins.yml</code> monthly. Unattended upgrades cover security patches in between.</li>
+<li><strong>Backups:</strong> the data volume (Jenkins home and SonarQube) is snapshotted daily at 02:00 IST and kept 14 days. To restore, create a volume from a snapshot, swap it in for the data volume and reboot.</li>
+<li><strong>New AMI:</strong> <code>terraform -chdir=terraform/ci apply -replace=aws_instance.jenkins</code>, then re-run the playbook. The data volume is kept, and is protected from <code>destroy</code>.</li>
+<li><strong>Cost:</strong> about $150 a month. Turn on <code>office_hours_schedule</code> to stop it outside working hours.</li>
+</ul>
+<h3 id="134-rotation">13.4 Rotation</h3>
+<ul>
+<li><strong>Jenkins AWS access:</strong> nothing to rotate. The EC2 instance role's credentials are short-lived and refreshed by AWS.</li>
+<li><strong>Jenkins tokens (GitHub, SonarQube, admin password):</strong> update <code>shopverse/ci/jenkins</code> in Secrets Manager, then re-run the Jenkins playbook with <code>--tags jenkins</code>.</li>
+<li><strong>RDS master password:</strong> rotated by AWS automatically.</li>
+<li><strong>Service DB passwords and JWT keys:</strong> see <code>docs/runbooks/secret-rotation.md</code>.</li>
+</ul>
+<h3 id="135-everyday-changes">13.5 Everyday changes</h3>
+<table>
+<thead>
+<tr>
+<th>I want to…</th>
+<th>Do this</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Ship a code change</td>
+<td>PR → Jenkins checks → merge → auto-deployed to dev → promote PR to staging → promote PR to prod</td>
+</tr>
+<tr>
+<td>Roll back</td>
+<td><code>git revert</code> the tag commit, or <code>kubectl argo rollouts undo &lt;svc&gt; -n shop</code>. See <code>docs/runbooks/rollback.md</code></td>
+</tr>
+<tr>
+<td>Change infrastructure</td>
+<td>Edit Terraform → PR (plan comment) → merge → dev/staging auto-apply, prod after approval</td>
+</tr>
+<tr>
+<td>Add a 16th service</td>
+<td><code>docs/runbooks/onboarding-new-service.md</code></td>
+</tr>
+<tr>
+<td>Scale</td>
+<td><code>docs/runbooks/scaling.md</code> (HPA, KEDA lag thresholds, Karpenter limits)</td>
+</tr>
+<tr>
+<td>Handle an incident</td>
+<td><code>docs/runbooks/incident-response.md</code></td>
+</tr>
+<tr>
+<td>Cut cost</td>
+<td>Kubecost dashboard + <code>docs/runbooks/cost-governance.md</code>; <code>terraform destroy</code> an environment you don't need</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Likely cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CloudFront or ALB certificate stuck in <em>Pending validation</em></td>
+<td>DNS not yet delegated</td>
+<td>Finish Phase 3.2; <code>dig NS ganga888.in</code> must show awsdns servers, then re-apply</td>
+</tr>
+<tr>
+<td>GitHub workflow fails at "Configure AWS credentials"</td>
+<td><code>AWS_ACCOUNT_ID</code> variable missing, or the repo name in <code>github_repo</code> doesn't match</td>
+<td>Fix Phase 4.1 / 1.2 and re-apply <code>terraform/global</code> as admin</td>
+</tr>
+<tr>
+<td><code>kubectl</code> returns <em>Unauthorized</em></td>
+<td>Your role isn't in <code>cluster_admin_role_arns</code></td>
+<td>Add it (Phase 5.1) and apply</td>
+</tr>
+<tr>
+<td>ArgoCD apps <em>OutOfSync</em> with "repository not found"</td>
+<td>Repo URL placeholder or private repo without credentials</td>
+<td>Fix Phase 1.2; for a private repo add it in ArgoCD → Settings → Repositories (GitHub App or deploy key)</td>
+</tr>
+<tr>
+<td>ExternalSecret <em>SecretSyncedError</em></td>
+<td>IRSA role ARN or account ID wrong</td>
+<td><code>kubectl describe externalsecret &lt;name&gt; -n &lt;ns&gt;</code>; check the role ARN annotations match <code>terraform output irsa_role_arns</code></td>
+</tr>
+<tr>
+<td>No ALB created</td>
+<td><code>vpcId</code> / certificate / WAF placeholders still dummy</td>
+<td>Phase 6; <code>kubectl -n kube-system logs deploy/aws-load-balancer-controller</code></td>
+</tr>
+<tr>
+<td>Pods <em>Pending</em> forever</td>
+<td>Karpenter node role or interruption queue placeholder wrong</td>
+<td>Phase 6; <code>kubectl -n kube-system logs deploy/karpenter</code></td>
+</tr>
+<tr>
+<td>Services <em>ImagePullBackOff</em> with tag <code>bootstrap</code></td>
+<td>Jenkins hasn't pushed yet</td>
+<td>Phase 8.5</td>
+</tr>
+<tr>
+<td><code>jenkins.ganga888.in</code> returns 403 "Forbidden"</td>
+<td>Your IP isn't in <code>admin_cidrs</code> (it changed?)</td>
+<td>Update <code>terraform/ci/terraform.tfvars</code> and apply</td>
+</tr>
+<tr>
+<td>ECR login fails in Jenkins with "Unable to locate credentials"</td>
+<td>Container can't reach IMDS, or <code>AWS_AUTH_MODE</code> isn't <code>instance-profile</code></td>
+<td>Instance metadata hop limit must be 2 (set by Terraform); check <code>/opt/jenkins/.env</code></td>
+</tr>
+<tr>
+<td>Ansible can't connect to the Jenkins host</td>
+<td>Session Manager plugin missing, or wrong instance ID / bucket</td>
+<td><code>aws ssm start-session --target &lt;id&gt;</code> must work first; recheck <code>inventories/ci/hosts.yml</code></td>
+</tr>
+<tr>
+<td>Pods rejected by Kyverno in staging/prod</td>
+<td>Image not signed by the cosign KMS key</td>
+<td>Build through Jenkins; never push by hand</td>
+</tr>
+<tr>
+<td>Orders stay PENDING</td>
+<td>Kafka unreachable or consumer lag</td>
+<td>Grafana Kafka lag dashboard; <code>kubectl -n shop logs deploy/inventory-service</code>; check the <code>.dlq</code> topics</td>
+</tr>
+<tr>
+<td>Nightly destroy leaves the VPC behind</td>
+<td>Leftover ALB, ENI or EBS from Kubernetes</td>
+<td>Re-run the destroy job; it sweeps tagged resources (see <code>docs/runbooks/nightly-destroy-and-recreate.md</code>)</td>
+</tr>
+</tbody>
+</table>
+</main></body></html>

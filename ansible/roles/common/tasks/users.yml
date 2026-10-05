@@ -1,0 +1,53 @@
+- name: Admin group
+  ansible.builtin.group:
+    name: "{{ common_admin_group }}"
+    state: present
+
+- name: Admin users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(omit) }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    groups: "{{ [common_admin_group] + (item.groups | default([])) }}"
+    append: true
+    password: "!"          # key-only login
+    update_password: on_create
+    state: present
+  loop: "{{ common_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Authorized keys (exclusive)
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.ssh_keys | join('\n') }}"
+    exclusive: true
+    state: present
+  loop: "{{ common_admin_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Passwordless sudo for the admin group
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ common_admin_group }}"
+    content: |
+      %{{ common_admin_group }} ALL=(ALL:ALL) NOPASSWD: ALL
+      Defaults:%{{ common_admin_group }} log_output
+      Defaults use_pty
+      Defaults logfile="/var/log/sudo.log"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Remove departed users
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: true
+  loop: "{{ common_removed_users }}"
+
+- name: Lock root password
+  ansible.builtin.user:
+    name: root
+    password_lock: true

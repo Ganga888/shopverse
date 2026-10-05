@@ -1,0 +1,12 @@
+# tfsec configuration (tfsec is now part of Trivy: `trivy config terraform/` honours the same IDs via
+# security/trivy/.trivyignore; this file is for teams still running tfsec directly):
+#   tfsec terraform --config-file security/tfsec/config.yml --custom-check-dir security/tfsec
+minimum_severity: MEDIUM
+severity_overrides:
+  # Missing mandatory tags is a contract violation, not just a hygiene issue.
+  CUS001: HIGH
+  CUS002: HIGH
+exclude:
+  # Same accepted risks as checkov (see security/checkov/.checkov.yaml for the rationale)
+  - aws-s3-enable-bucket-logging        # only on the log bucket itself
+  - aws-eks-no-public-cluster-access-to-cidr   # dev only: API endpoint allow-listed to office/VPN CIDRs, private in staging/prod

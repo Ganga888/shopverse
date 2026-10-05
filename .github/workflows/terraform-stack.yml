@@ -1,0 +1,116 @@
+# Reusable: plan a stack (read-only role), then apply exactly that saved plan
+# in a job bound to a GitHub environment (approval gate for prod).
+name: terraform-stack
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        description: "Path under terraform/ (global, envs/dev, envs/staging, envs/prod)"
+        type: string
+        required: true
+      environment:
+        description: "GitHub environment used for the apply job"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: ap-south-1
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    name: plan ${{ inputs.stack }}
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.plan.outputs.changes }}
+    defaults:
+      run:
+        working-directory: terraform/${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/shopverse-gha-plan
+          role-session-name: gha-plan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - run: terraform init -input=false -backend-config="$GITHUB_WORKSPACE/terraform/backend.hcl"
+
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -lock-timeout=10m -no-color -detailed-exitcode -out=tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          cat plan.log
+          [ "$code" -eq 1 ] && exit 1
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Plan for \`${{ inputs.stack }}\` -> environment \`${{ inputs.environment }}\`"
+            echo '```'
+            grep -E '^(Plan:|No changes)' plan.log || true
+            echo '```'
+            echo '<details><summary>Full plan</summary>'
+            echo
+            echo '```terraform'
+            tail -c 60000 plan.log
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.plan.outputs.changes == 'true'
+        with:
+          name: tfplan-${{ inputs.environment }}-${{ github.run_id }}
+          path: terraform/${{ inputs.stack }}/tfplan
+          retention-days: 5
+
+  apply:
+    name: apply ${{ inputs.stack }}
+    needs: plan
+    if: needs.plan.outputs.changes == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: terraform-${{ inputs.stack }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: terraform/${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/shopverse-gha-apply
+          role-session-name: gha-apply-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - run: terraform init -input=false -backend-config="$GITHUB_WORKSPACE/terraform/backend.hcl"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}-${{ github.run_id }}
+          path: terraform/${{ inputs.stack }}
+
+      - name: terraform apply (saved plan)
+        run: terraform apply -input=false -lock-timeout=10m -auto-approve tfplan

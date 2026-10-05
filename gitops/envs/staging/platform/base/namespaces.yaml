@@ -1,0 +1,169 @@
+# Namespaces with Pod Security Standards labels (contract: shop = restricted).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged  # node-exporter needs hostNetwork/hostPID/hostPath
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: logging
+  labels:
+    pod-security.kubernetes.io/enforce: privileged  # fluent-bit DaemonSet mounts /var/log via hostPath
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tracing
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keda
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: velero
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubecost
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-rollouts
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    app.kubernetes.io/part-of: shopverse
+    shopverse.io/env: staging
+  annotations:
+    argocd.argoproj.io/sync-options: Delete=false

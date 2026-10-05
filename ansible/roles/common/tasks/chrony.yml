@@ -1,0 +1,21 @@
+- name: chrony configuration
+  ansible.builtin.template:
+    src: chrony.conf.j2
+    dest: /etc/chrony/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chrony
+
+- name: Disable systemd-timesyncd (chrony owns time)
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: chrony enabled
+  ansible.builtin.systemd_service:
+    name: chrony
+    enabled: true
+    state: started

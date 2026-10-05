@@ -1,0 +1,64 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: shopverse-nodes
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+    app.kubernetes.io/part-of: shopverse
+spec:
+  groups:
+    - name: shopverse-nodes
+      rules:
+        - alert: NodeMemoryPressure
+          expr: kube_node_status_condition{condition="MemoryPressure",status="true"} == 1
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Node {{ $labels.node }} reports MemoryPressure (kubelet is evicting pods)"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/scaling.md
+        - alert: NodeDiskPressure
+          expr: kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Node {{ $labels.node }} reports DiskPressure"
+        - alert: NodePIDPressure
+          expr: kube_node_status_condition{condition="PIDPressure",status="true"} == 1
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Node {{ $labels.node }} reports PIDPressure"
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "Node {{ $labels.node }} NotReady for 10m (Karpenter should replace it)"
+        - alert: NodeHighMemoryUtilisation
+          expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.92
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $labels.instance }} memory utilisation {{ $value | humanizePercentage }}"
+        - alert: ClusterCPURequestsOvercommitted
+          expr: sum(kube_pod_container_resource_requests{resource="cpu"}) / sum(kube_node_status_allocatable{resource="cpu"}) > 0.95
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "CPU requests are {{ $value | humanizePercentage }} of allocatable - check Karpenter NodePool limits"
+        - alert: PodsPendingTooLong
+          expr: sum by (namespace) (kube_pod_status_phase{phase="Pending"}) > 0
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ $value }} pod(s) Pending > 10m in {{ $labels.namespace }} - Karpenter cannot provision (limits, ICE, quota?)"
+            runbook_url: https://github.com/shopverse/aws-microservices/blob/main/docs/runbooks/scaling.md
+        - alert: KarpenterNodePoolLimitNear
+          expr: |
+            sum by (nodepool) (karpenter_nodepools_usage{resource_type="cpu"})
+            / sum by (nodepool) (karpenter_nodepools_limit{resource_type="cpu"}) > 0.9
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "NodePool {{ $labels.nodepool }} at {{ $value | humanizePercentage }} of its CPU limit"

@@ -1,0 +1,27 @@
+- name: Restart sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: restarted
+
+- name: Restart auditd
+  ansible.builtin.command: /usr/sbin/service auditd restart  # auditd refuses systemctl restart
+  changed_when: true
+
+- name: Load audit rules
+  ansible.builtin.command: /usr/sbin/augenrules --load
+  changed_when: true
+
+- name: Restart fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    state: restarted
+
+- name: Restart chrony
+  ansible.builtin.systemd_service:
+    name: chrony
+    state: restarted
+
+- name: Restart journald
+  ansible.builtin.systemd_service:
+    name: systemd-journald
+    state: restarted

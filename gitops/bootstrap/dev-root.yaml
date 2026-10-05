@@ -1,0 +1,97 @@
+# ShopVerse dev app-of-apps. Applied once after ArgoCD is installed (Terraform helm_release or
+#   kubectl apply -n argocd -f gitops/bootstrap/dev-root.yaml
+# ). Everything else - including ArgoCD itself - is reconciled from git.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-100"
+spec:
+  description: Cluster add-ons and platform configuration (dev)
+  sourceRepos:
+    - https://github.com/shopverse/aws-microservices.git
+    - https://argoproj.github.io/argo-helm
+    - https://aws.github.io/eks-charts
+    - https://kubernetes-sigs.github.io/metrics-server/
+    - https://kubernetes-sigs.github.io/external-dns/
+    - https://charts.external-secrets.io
+    - public.ecr.aws/karpenter
+    - https://prometheus-community.github.io/helm-charts
+    - https://kubernetes.github.io/ingress-nginx
+    - https://kedacore.github.io/charts
+    - https://helm.elastic.co
+    - https://kyverno.github.io/kyverno/
+    - https://vmware-tanzu.github.io/helm-charts
+    - https://fluent.github.io/helm-charts
+    - https://jaegertracing.github.io/helm-charts
+    - https://open-telemetry.github.io/opentelemetry-helm-charts
+    - https://kubecost.github.io/cost-analyzer/
+    - https://strimzi.io/charts/
+    - registry-1.docker.io/bitnamicharts
+    - https://helm.linkerd.io/edge
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  orphanedResources:
+    warn: true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: shopverse
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-100"
+spec:
+  description: ShopVerse microservices (dev) - namespace shop only, no cluster-scoped resources
+  sourceRepos:
+    - https://github.com/shopverse/aws-microservices.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: shop
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  roles:
+    - name: deployer
+      description: CI promote workflow - sync and rollout actions only
+      policies:
+        - p, proj:shopverse:deployer, applications, get, shopverse/*, allow
+        - p, proj:shopverse:deployer, applications, sync, shopverse/*, allow
+        - p, proj:shopverse:deployer, applications, action/argoproj.io/Rollout/*, shopverse/*, allow
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shopverse-dev-root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/shopverse/aws-microservices.git
+    targetRevision: main
+    path: gitops/envs/dev/apps
+    directory:
+      recurse: false                       # apps/optional/* is intentionally not synced
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions: [ServerSideApply=true]
+    retry:
+      limit: 10
+      backoff: { duration: 10s, factor: 2, maxDuration: 5m }

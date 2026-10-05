@@ -1,0 +1,67 @@
+# cart-service (dev) - values for charts/microservice. Release name == cart-service, namespace shop.
+# image.tag is bumped by Jenkins (ci/Jenkinsfile) after every main-branch build.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+global:
+  env: dev
+  domain: dev.ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/cart-service
+  tag: bootstrap
+replicaCount: 2
+logLevel: debug
+nodeEnv: production
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 300m
+    memory: 256Mi
+ingress:
+  enabled: true
+  path: /api/v1/cart
+serviceAccount:
+  irsa:
+    enabled: false
+env:
+  NODE_OPTIONS: --max-old-space-size=192
+  REDIS_URL: redis://redis-master.data.svc.cluster.local:6379/0
+  KAFKA_BROKERS: shopverse-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092
+  KAFKA_SSL: 'false'
+  KAFKA_CLIENT_ID: cart-service
+  KAFKA_GROUP_ID: cart-service
+externalSecrets:
+  enabled: false
+  items: []
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpread:
+  zoneWhenUnsatisfiable: ScheduleAnyway
+prometheusRule:
+  severity: warning
+networkPolicy:
+  callers:
+  - order-service
+  egressToServices:
+  - catalog-service
+  - promotion-service
+  - inventory-service
+  egress:
+    postgres: false
+    redis: true
+    kafka: true
+  datastorePeers:
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: data
+  - namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kafka

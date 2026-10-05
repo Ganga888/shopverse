@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/.env*
+**/test
+**/*.test.ts
+docker-compose.yml
+local
+scripts
+README.md

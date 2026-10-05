@@ -1,0 +1,41 @@
+- name: Supported platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['os_family'] == 'Debian'
+    fail_msg: "The common role supports Ubuntu/Debian hosts only"
+
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+  tags: [packages]
+
+- name: Users
+  ansible.builtin.import_tasks: users.yml
+  tags: [users]
+
+- name: SSH hardening
+  ansible.builtin.import_tasks: ssh.yml
+  tags: [ssh]
+
+- name: Unattended upgrades
+  ansible.builtin.import_tasks: unattended_upgrades.yml
+  tags: [upgrades]
+
+- name: auditd
+  ansible.builtin.import_tasks: auditd.yml
+  tags: [auditd]
+
+- name: fail2ban
+  ansible.builtin.import_tasks: fail2ban.yml
+  tags: [fail2ban]
+
+- name: chrony
+  ansible.builtin.import_tasks: chrony.yml
+  tags: [chrony]
+
+- name: Kernel / sysctl hardening
+  ansible.builtin.import_tasks: sysctl.yml
+  tags: [sysctl]
+
+- name: Host firewall
+  ansible.builtin.import_tasks: firewall.yml
+  tags: [firewall]

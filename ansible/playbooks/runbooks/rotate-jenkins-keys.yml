@@ -1,0 +1,160 @@
+# LAPTOP MODE ONLY (terraform/global create_jenkins_ci_user = true). Jenkins on EC2 (terraform/ci)
+# uses its instance role and has no access key to rotate.
+#
+# Rotate the access key of IAM user `jenkins-ci` (ECR push + cosign KMS sign).
+# The key exists ONLY in the Jenkins credentials store: this playbook creates a
+# new key, writes it straight into Jenkins via the REST API, verifies it,
+# then deactivates and deletes the previous key. Nothing is written to disk.
+#
+#   ansible-playbook playbooks/runbooks/rotate-jenkins-keys.yml \
+#     -e jenkins_url=https://jenkins.ganga888.in -e jenkins_admin_user=admin \
+#     -e @secrets/jenkins-admin.vault.yml --ask-vault-pass
+#
+# Requires: AWS credentials allowed to manage jenkins-ci access keys (an admin
+# role, or the jenkins-ci user itself via its SelfRotateKeys statement) and a
+# Jenkins admin API token in `jenkins_admin_token` (vault).
+- name: Rotate jenkins-ci access key
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    iam_user: jenkins-ci
+    aws_region: ap-south-1
+    jenkins_url: "https://jenkins.ganga888.in"
+    jenkins_admin_user: admin
+    jenkins_admin_token: "{{ lookup('env', 'JENKINS_ADMIN_TOKEN') }}"
+    jenkins_credential_id: aws-jenkins-ci          # referenced by Jenkinsfiles/JCasC
+    jenkins_credential_description: "IAM user jenkins-ci (ECR push + cosign KMS sign) - rotated by ansible"
+    delete_old_key: true
+  tasks:
+    - name: Preconditions
+      ansible.builtin.assert:
+        that:
+          - jenkins_admin_token | length > 0
+        fail_msg: "Provide jenkins_admin_token (vault) or JENKINS_ADMIN_TOKEN"
+
+    - name: Existing keys
+      amazon.aws.iam_access_key_info:
+        user_name: "{{ iam_user }}"
+      register: existing
+
+    - name: Remove inactive leftovers (IAM allows only 2 keys)
+      amazon.aws.iam_access_key:
+        user_name: "{{ iam_user }}"
+        id: "{{ item.access_key_id }}"
+        state: absent
+      loop: "{{ existing.access_keys | selectattr('status', 'equalto', 'Inactive') | list }}"
+      loop_control:
+        label: "{{ item.access_key_id }}"
+
+    - name: Refuse if two active keys already exist
+      ansible.builtin.assert:
+        that: (existing.access_keys | selectattr('status', 'equalto', 'Active') | list | length) < 2
+        fail_msg: "jenkins-ci already has 2 active keys - investigate before rotating"
+
+    - name: Remember the current key
+      ansible.builtin.set_fact:
+        old_keys: "{{ existing.access_keys | selectattr('status', 'equalto', 'Active') | map(attribute='access_key_id') | list }}"
+
+    - name: Create new access key
+      amazon.aws.iam_access_key:
+        user_name: "{{ iam_user }}"
+        state: present
+        rotate_keys: false
+      register: new_key
+      no_log: true
+
+    - name: Wait for IAM propagation and verify the new key
+      amazon.aws.aws_caller_info:
+        access_key: "{{ new_key.access_key_id }}"
+        secret_key: "{{ new_key.secret_access_key }}"
+        region: "{{ aws_region }}"
+      register: new_identity
+      retries: 12
+      delay: 5
+      until: new_identity is succeeded
+      no_log: true
+
+    - name: Jenkins crumb
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/crumbIssuer/api/json"
+        user: "{{ jenkins_admin_user }}"
+        password: "{{ jenkins_admin_token }}"
+        force_basic_auth: true
+        return_content: true
+      register: crumb
+      no_log: true
+
+    - name: Credential XML
+      ansible.builtin.set_fact:
+        credential_xml: |
+          <com.cloudbees.jenkins.plugins.awscredentials.AWSCredentialsImpl plugin="aws-credentials">
+            <scope>GLOBAL</scope>
+            <id>{{ jenkins_credential_id }}</id>
+            <description>{{ jenkins_credential_description }} {{ lookup('pipe', 'date -u +%FT%TZ') }}</description>
+            <accessKey>{{ new_key.access_key_id }}</accessKey>
+            <secretKey>{{ new_key.secret_access_key }}</secretKey>
+            <iamRoleArn></iamRoleArn>
+            <iamMfaSerialNumber></iamMfaSerialNumber>
+          </com.cloudbees.jenkins.plugins.awscredentials.AWSCredentialsImpl>
+      no_log: true
+
+    - name: Does the Jenkins credential exist?
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/credentials/store/system/domain/_/credential/{{ jenkins_credential_id }}/api/json"
+        user: "{{ jenkins_admin_user }}"
+        password: "{{ jenkins_admin_token }}"
+        force_basic_auth: true
+        status_code: [200, 404]
+      register: cred_exists
+      no_log: true
+
+    - name: Update credential in place
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/credentials/store/system/domain/_/credential/{{ jenkins_credential_id }}/config.xml"
+        method: POST
+        user: "{{ jenkins_admin_user }}"
+        password: "{{ jenkins_admin_token }}"
+        force_basic_auth: true
+        headers: "{{ {'Content-Type': 'application/xml', crumb.json.crumbRequestField: crumb.json.crumb} }}"
+        body: "{{ credential_xml }}"
+        status_code: [200]
+      when: cred_exists.status == 200
+      no_log: true
+
+    - name: Create credential
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/credentials/store/system/domain/_/createCredentials"
+        method: POST
+        user: "{{ jenkins_admin_user }}"
+        password: "{{ jenkins_admin_token }}"
+        force_basic_auth: true
+        headers: "{{ {'Content-Type': 'application/xml', crumb.json.crumbRequestField: crumb.json.crumb} }}"
+        body: "{{ credential_xml }}"
+        status_code: [200, 302]
+      when: cred_exists.status == 404
+      no_log: true
+
+    - name: Deactivate previous key(s)
+      amazon.aws.iam_access_key:
+        user_name: "{{ iam_user }}"
+        id: "{{ item }}"
+        active: false
+        state: present
+      loop: "{{ old_keys }}"
+
+    - name: Delete previous key(s)
+      amazon.aws.iam_access_key:
+        user_name: "{{ iam_user }}"
+        id: "{{ item }}"
+        state: absent
+      loop: "{{ old_keys }}"
+      when: delete_old_key | bool
+
+    - name: Result
+      ansible.builtin.debug:
+        msg:
+          - "New key {{ new_key.access_key_id }} stored in Jenkins credential '{{ jenkins_credential_id }}' (verified as {{ new_identity.arn }})."
+          - "Previous key(s) {{ old_keys | join(', ') or 'none' }} {{ 'deleted' if delete_old_key | bool else 'deactivated' }}."
+          - "Run a pipeline that pushes to ECR to confirm; re-activate the old key with the AWS console if it fails before deletion."

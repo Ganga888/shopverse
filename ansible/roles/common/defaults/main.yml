@@ -1,0 +1,89 @@
+common_packages:
+  - acl
+  - apt-transport-https
+  - auditd
+  - audispd-plugins
+  - ca-certificates
+  - chrony
+  - curl
+  - fail2ban
+  - gnupg
+  - jq
+  - needrestart
+  - python3-pip
+  - ufw
+  - unattended-upgrades
+  - apt-listchanges
+  - unzip
+
+common_removed_packages:
+  - telnet
+  - rsh-client
+  - talk
+  - nis
+
+# Admin users: [{name, comment, ssh_keys: [..], shell}]
+common_admin_users: []
+# Users to remove (e.g. leavers)
+common_removed_users: []
+common_admin_group: platform-admins
+
+# SSH
+common_ssh_port: 22
+common_ssh_allowed_cidrs: ["10.0.0.0/8"]
+common_ssh_allow_groups: ["{{ common_admin_group }}", "ubuntu", "ssm-user"]
+common_ssh_max_auth_tries: 3
+
+# Unattended upgrades
+common_unattended_reboot: false
+common_unattended_reboot_time: "03:30"
+
+# auditd
+common_auditd_immutable: false
+common_auditd_max_log_file_mb: 50
+
+# fail2ban
+common_fail2ban_bantime: 1h
+common_fail2ban_findtime: 10m
+common_fail2ban_maxretry: 5
+
+# chrony: Amazon Time Sync Service first, public pool as fallback
+common_ntp_servers:
+  - "169.254.169.123 prefer iburst minpoll 4 maxpoll 4"
+common_ntp_pools:
+  - "ntp.ubuntu.com iburst maxsources 2"
+
+# sysctl (Docker hosts need ip_forward=1; the docker role overrides it)
+common_ip_forward: 0
+common_sysctl:
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.secure_redirects: 0
+  net.ipv4.conf.default.secure_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv6.conf.all.accept_ra: 0
+  net.ipv6.conf.default.accept_ra: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  kernel.randomize_va_space: 2
+  kernel.dmesg_restrict: 1
+  kernel.kptr_restrict: 2
+  kernel.yama.ptrace_scope: 1
+  fs.suid_dumpable: 0
+  fs.protected_hardlinks: 1
+  fs.protected_symlinks: 1
+
+# squashfs stays enabled (snapd on Ubuntu)
+common_disabled_filesystems: [cramfs, freevxfs, hfs, hfsplus, jffs2, udf]
+common_login_banner: |
+  Authorized access only. ShopVerse ({{ env | default('unknown') }}) - activity is logged and monitored.

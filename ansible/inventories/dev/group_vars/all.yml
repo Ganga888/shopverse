@@ -1,0 +1,17 @@
+ansible_user: ubuntu
+aws_region: ap-south-1
+project: shopverse
+
+common_admin_users:
+  - name: platform
+    comment: "Platform team"
+    ssh_keys:
+      - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleReplaceWithRealKeyPlatformTeam platform@ganga888.in"
+common_ssh_allowed_cidrs: ["10.10.0.0/16", "203.0.113.0/24"]
+node_exporter_allowed_cidrs: ["10.10.0.0/16"]
+
+jenkins_url: "https://jenkins.dev.ganga888.in"
+jenkins_allowed_cidrs: ["10.10.0.0/16", "203.0.113.0/24"]
+jenkins_backup_bucket: "shopverse-dev-velero"
+
+cloudwatch_agent_log_group_prefix: "/shopverse/dev/hosts"

@@ -1,0 +1,103 @@
+# End-to-end API tests (Postman collection) against https://api.<env domain>.
+name: newman-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to test
+        type: choice
+        options: [dev, staging, prod]
+        required: true
+        default: dev
+  # Fired by the deploy pipeline (Jenkins / ArgoCD notification) after a sync:
+  #   gh api repos/<owner>/<repo>/dispatches -f event_type=deploy-finished -F client_payload[environment]=staging
+  repository_dispatch:
+    types: [deploy-finished]
+  workflow_run:
+    workflows: [web-deploy]
+    types: [completed]
+
+permissions:
+  contents: read
+  checks: write
+
+env:
+  NODE_VERSION: "22"
+  COLLECTION_DIR: tests/postman
+
+jobs:
+  e2e:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve environment
+        id: env
+        run: |
+          env="${{ inputs.environment || github.event.client_payload.environment || 'dev' }}"
+          case "$env" in dev|staging|prod) ;; *) echo "::error::bad environment $env"; exit 1 ;; esac
+          if [ "$env" = "prod" ]; then domain="ganga888.in"; else domain="$env.ganga888.in"; fi
+          echo "name=$env" >> "$GITHUB_OUTPUT"
+          echo "base_url=https://api.$domain" >> "$GITHUB_OUTPUT"
+          echo "web_url=https://$domain" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install newman
+        run: npm install -g newman@6 newman-reporter-htmlextra@1
+
+      - name: Wait for API
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.env.outputs.base_url }}/api/v1/products" || true)
+            echo "attempt $i: $code"
+            case "$code" in 2??|401|403|404) exit 0 ;; esac
+            sleep 10
+          done
+          echo "::error::API not reachable at ${{ steps.env.outputs.base_url }}"; exit 1
+
+      - name: Run collection
+        env:
+          ENV_NAME: ${{ steps.env.outputs.name }}
+          BASE_URL: ${{ steps.env.outputs.base_url }}
+          WEB_URL: ${{ steps.env.outputs.web_url }}
+        run: |
+          set -euo pipefail
+          collection=$(ls "$COLLECTION_DIR"/*.postman_collection.json | head -1)
+          test -n "$collection" || { echo "::error::no collection in $COLLECTION_DIR"; exit 1; }
+          env_args=()
+          for f in "$COLLECTION_DIR/environments/$ENV_NAME.postman_environment.json" "$COLLECTION_DIR/$ENV_NAME.postman_environment.json"; do
+            if [ -f "$f" ]; then env_args=(-e "$f"); break; fi
+          done
+          mkdir -p reports
+          newman run "$collection" "${env_args[@]}" \
+            --env-var "baseUrl=$BASE_URL" \
+            --env-var "webUrl=$WEB_URL" \
+            --env-var "runId=${GITHUB_RUN_ID}" \
+            --timeout-request 30000 \
+            --delay-request 50 \
+            --color on \
+            --reporters cli,junit,htmlextra \
+            --reporter-junit-export reports/newman-junit.xml \
+            --reporter-htmlextra-export reports/newman-report.html
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-${{ steps.env.outputs.name }}-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
+
+      - name: Publish test results
+        if: always() && hashFiles('reports/newman-junit.xml') != ''
+        uses: dorny/test-reporter@v1
+        with:
+          name: newman e2e (${{ steps.env.outputs.name }})
+          path: reports/newman-junit.xml
+          reporter: java-junit

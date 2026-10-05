@@ -1,0 +1,20 @@
+{
+  "name": "@shopverse/search-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Full-text product search (Postgres tsvector)",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node --enable-source-maps --import @shopverse/common/tracing dist/index.js",
+    "dev": "tsx watch --import @shopverse/common/tracing src/index.ts",
+    "lint": "eslint src test",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@shopverse/common": "1.0.0",
+    "zod": "^4.6.0"
+  }
+}

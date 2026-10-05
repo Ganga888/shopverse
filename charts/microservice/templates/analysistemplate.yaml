@@ -1,0 +1,41 @@
+{{- if .Values.rollout.enabled }}
+{{- $a := .Values.rollout.analysis }}
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "microservice.name" . }}-canary-analysis
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+spec:
+  args:
+    - name: service-name
+    - name: canary-hash
+  metrics:
+    # Success rate of the canary pods (non-5xx / all). No traffic yet (NaN) is treated as success.
+    - name: success-rate
+      interval: {{ $a.interval }}
+      count: {{ $a.count }}
+      failureLimit: {{ $a.failureLimit }}
+      successCondition: "isNaN(result[0]) || result[0] >= {{ $a.successRateThreshold }}"
+      provider:
+        prometheus:
+          address: {{ $a.prometheusAddress }}
+          timeout: 20
+          query: |
+            sum(rate(http_request_duration_seconds_count{namespace="{{ .Release.Namespace }}",job="{{ "{{" }}args.service-name{{ "}}" }}",rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}",status!~"5.."}[2m]))
+            /
+            sum(rate(http_request_duration_seconds_count{namespace="{{ .Release.Namespace }}",job="{{ "{{" }}args.service-name{{ "}}" }}",rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}"}[2m]))
+    # p95 latency of the canary pods in seconds.
+    - name: p95-latency
+      interval: {{ $a.interval }}
+      count: {{ $a.count }}
+      failureLimit: {{ $a.failureLimit }}
+      successCondition: "isNaN(result[0]) || result[0] <= {{ $a.p95LatencyThreshold }}"
+      provider:
+        prometheus:
+          address: {{ $a.prometheusAddress }}
+          timeout: 20
+          query: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_request_duration_seconds_bucket{namespace="{{ .Release.Namespace }}",job="{{ "{{" }}args.service-name{{ "}}" }}",rollouts_pod_template_hash="{{ "{{" }}args.canary-hash{{ "}}" }}"}[2m])))
+{{- end }}

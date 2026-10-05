@@ -1,0 +1,11 @@
+{
+  "name": "@shopverse/web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ShopVerse static SPA (plain HTML/JS, no build step). Deployed to s3://shopverse-<env>-web behind CloudFront.",
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r index.html src public dist/",
+    "deploy": "aws s3 sync dist/ s3://shopverse-${ENV:-dev}-web/ --delete --cache-control max-age=300"
+  }
+}

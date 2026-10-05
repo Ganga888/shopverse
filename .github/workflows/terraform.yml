@@ -1,0 +1,246 @@
+name: terraform
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+      - ".github/workflows/terraform-stack.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
+      - ".github/workflows/terraform-stack.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: "1.9.8"
+  TFLINT_VERSION: "v0.53.0"
+  AWS_REGION: ap-south-1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static analysis (no AWS access)
+  # ---------------------------------------------------------------------------
+  static:
+    name: fmt / tflint / tfsec / checkov
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff terraform
+
+      - name: terraform validate + test (mocked providers, no AWS access)
+        run: |
+          for d in bootstrap global ci envs/dev envs/staging envs/prod; do
+            echo "::group::$d"
+            terraform -chdir="terraform/$d" init -backend=false -input=false
+            terraform -chdir="terraform/$d" validate
+            terraform -chdir="terraform/$d" test
+            echo "::endgroup::"
+          done
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-${{ hashFiles('terraform/.tflint.hcl') }}
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: tflint
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init --config "$PWD/.tflint.hcl"
+          tflint --recursive --config "$PWD/.tflint.hcl" --format compact
+
+      - name: tfsec (HIGH and above block the PR)
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          additional_args: --minimum-severity HIGH
+
+      - name: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          config_file: terraform/.checkov.yaml
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail: true # findings are reported to code scanning; tfsec gates HIGH/CRITICAL
+
+      - name: Upload checkov SARIF
+        if: always() && hashFiles('checkov.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  # ---------------------------------------------------------------------------
+  # PR: plan every stack with the read-only role and comment the result
+  # ---------------------------------------------------------------------------
+  plan:
+    name: plan (${{ matrix.stack }})
+    if: github.event_name == 'pull_request'
+    needs: static
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [global, ci, envs/dev, envs/staging, envs/prod]
+    concurrency:
+      group: tfplan-${{ matrix.stack }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    defaults:
+      run:
+        working-directory: terraform/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/shopverse-gha-plan
+          role-session-name: gha-plan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false -backend-config="$GITHUB_WORKSPACE/terraform/backend.hcl"
+
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -lock-timeout=5m -no-color -detailed-exitcode -out=tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          cat plan.log
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then exit 1; fi
+
+      - name: Comment plan on PR
+        if: always() && steps.plan.outputs.exitcode != ''
+        uses: actions/github-script@v7
+        env:
+          STACK: ${{ matrix.stack }}
+          EXITCODE: ${{ steps.plan.outputs.exitcode }}
+          PLAN_FILE: terraform/${{ matrix.stack }}/plan.log
+        with:
+          script: |
+            const fs = require('fs');
+            const stack = process.env.STACK;
+            const marker = `<!-- shopverse-tfplan:${stack} -->`;
+            let plan = fs.readFileSync(process.env.PLAN_FILE, 'utf8');
+            const summary = (plan.match(/^(Plan:.*|No changes\..*)$/m) || ['(see log)'])[0];
+            const max = 60000;
+            if (plan.length > max) plan = '... (truncated, see workflow log)\n' + plan.slice(-max);
+            const status = { '0': 'no changes', '1': 'FAILED', '2': 'changes' }[process.env.EXITCODE] || 'unknown';
+            const fence = '```';
+            const body = [
+              marker,
+              `### Terraform plan: \`${stack}\` (${status})`,
+              `**${summary}**`,
+              '',
+              '<details><summary>Show plan</summary>',
+              '',
+              fence + 'terraform',
+              plan,
+              fence,
+              '</details>',
+              '',
+              `_run [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) - ${context.sha.substring(0, 7)}_`,
+            ].join('\n');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
+
+  # ---------------------------------------------------------------------------
+  # main: global -> dev -> staging automatically, prod behind `environment: prod`
+  # (configure required reviewers on the prod environment in repo settings)
+  # ---------------------------------------------------------------------------
+  apply-global:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: static
+    uses: ./.github/workflows/terraform-stack.yml
+    with:
+      stack: global
+      environment: global
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  # Jenkins + SonarQube EC2 host (shared by all environments)
+  apply-ci:
+    needs: apply-global
+    uses: ./.github/workflows/terraform-stack.yml
+    with:
+      stack: ci
+      environment: global
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  apply-dev:
+    needs: apply-global
+    uses: ./.github/workflows/terraform-stack.yml
+    with:
+      stack: envs/dev
+      environment: dev
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  apply-staging:
+    needs: apply-dev
+    uses: ./.github/workflows/terraform-stack.yml
+    with:
+      stack: envs/staging
+      environment: staging
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write
+
+  apply-prod:
+    needs: apply-staging
+    uses: ./.github/workflows/terraform-stack.yml
+    with:
+      stack: envs/prod
+      environment: prod
+    secrets: inherit
+    permissions:
+      contents: read
+      id-token: write

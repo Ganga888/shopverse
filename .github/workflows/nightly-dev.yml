@@ -1,0 +1,202 @@
+# Cost control for dev: tear down EKS + compute (and NAT) every evening,
+# bring it back on weekday mornings. Data stores in dev are in-cluster and
+# disposable; VPC, S3, secrets, CloudFront and certificates are kept.
+name: nightly-dev
+
+on:
+  schedule:
+    - cron: "30 14 * * *"   # 20:00 IST daily  -> destroy
+    - cron: "30 2 * * 1-5"  # 08:00 IST Mon-Fri -> create
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "destroy or create the dev cluster"
+        type: choice
+        options: [destroy, create]
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-envs/dev # same group as terraform-stack.yml apply for dev
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.9.8"
+  AWS_REGION: ap-south-1
+  CLUSTER: shopverse-dev
+  TF_DIR: terraform/envs/dev
+  ARGOCD_CHART_VERSION: "7.8.2"
+  TF_IN_AUTOMATION: "true"
+  # Everything that costs money per hour; dependents (access entries, add-ons,
+  # node groups, routes through the NAT) are destroyed with them.
+  DESTROY_TARGETS: >-
+    -target=module.eks
+    -target=module.karpenter
+    -target=module.irsa
+    -target=module.vpc.module.vpc.aws_nat_gateway.this
+    -target=module.vpc.module.vpc.aws_eip.nat
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.pick.outputs.action }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ inputs.action }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "30 14 * * *" ]; then
+            echo "action=destroy" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=create" >> "$GITHUB_OUTPUT"
+          fi
+
+  destroy:
+    needs: decide
+    if: needs.decide.outputs.action == 'destroy'
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/shopverse-gha-apply
+          role-session-name: gha-nightly-destroy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - uses: azure/setup-kubectl@v4
+
+      - name: Does the cluster exist?
+        id: cluster
+        run: |
+          if aws eks describe-cluster --name "$CLUSTER" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Cluster $CLUSTER not found - only the Terraform pass will run."
+          fi
+
+      - name: Remove Kubernetes-created AWS resources (ALB, Karpenter nodes, EBS)
+        if: steps.cluster.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+
+          # 1. Stop ArgoCD from re-creating what we delete.
+          kubectl -n argocd scale statefulset,deployment --all --replicas=0 || true
+
+          # 2. ALB Ingresses and LoadBalancer Services -> controller deletes the ALB/NLB.
+          kubectl get ingress -A -o json \
+            | jq -r '.items[] | select(.spec.ingressClassName=="alb" or .metadata.annotations["kubernetes.io/ingress.class"]=="alb") | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do kubectl -n "$ns" delete ingress "$name" --wait=false; done
+          kubectl get svc -A -o json \
+            | jq -r '.items[] | select(.spec.type=="LoadBalancer") | "\(.metadata.namespace) \(.metadata.name)"' \
+            | while read -r ns name; do kubectl -n "$ns" delete svc "$name" --wait=false; done
+
+          for i in $(seq 1 30); do
+            n=$(aws resourcegroupstaggingapi get-resources --resource-type-filters elasticloadbalancing:loadbalancer \
+                  --tag-filters "Key=elbv2.k8s.aws/cluster,Values=$CLUSTER" --query 'length(ResourceTagMappingList)' --output text)
+            [ "$n" = "0" ] && break
+            echo "waiting for $n load balancer(s) to be deleted..."; sleep 10
+          done
+
+          # 3. Karpenter NodePools -> nodes drained and EC2 terminated by Karpenter.
+          kubectl delete nodepools.karpenter.sh --all --wait=false || true
+          kubectl wait --for=delete nodeclaims.karpenter.sh --all --timeout=8m || true
+
+          # 4. PVCs -> EBS volumes deleted by the CSI driver (still running on system nodes).
+          kubectl delete pvc -A --all --wait=false || true
+          kubectl wait --for=delete pv --all --timeout=5m || true
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform destroy (EKS + compute + NAT)
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false -backend-config="$GITHUB_WORKSPACE/terraform/backend.hcl"
+          terraform destroy -input=false -auto-approve -lock-timeout=10m $DESTROY_TARGETS
+
+      - name: Sweep leftovers (Karpenter EC2, unattached EBS)
+        if: always()
+        run: |
+          set -euo pipefail
+          ids=$(aws ec2 describe-instances \
+                  --filters "Name=tag-key,Values=karpenter.sh/nodepool" "Name=tag:kubernetes.io/cluster/$CLUSTER,Values=owned" \
+                            "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+                  --query 'Reservations[].Instances[].InstanceId' --output text)
+          if [ -n "$ids" ]; then echo "terminating $ids"; aws ec2 terminate-instances --instance-ids $ids >/dev/null; fi
+
+          vols=$(aws ec2 describe-volumes \
+                   --filters "Name=tag:shopverse.io/cluster,Values=$CLUSTER" "Name=status,Values=available" \
+                   --query 'Volumes[].VolumeId' --output text)
+          for v in $vols; do echo "deleting volume $v"; aws ec2 delete-volume --volume-id "$v" || true; done
+
+      - name: Summary
+        if: always()
+        run: echo "Dev compute destroyed at $(TZ=Asia/Kolkata date '+%F %R IST'). Recreate with workflow_dispatch action=create." >> "$GITHUB_STEP_SUMMARY"
+
+  create:
+    needs: decide
+    if: needs.decide.outputs.action == 'create'
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/shopverse-gha-apply
+          role-session-name: gha-nightly-create-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 7200
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform apply (full dev env)
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init -input=false -backend-config="$GITHUB_WORKSPACE/terraform/backend.hcl"
+          terraform apply -input=false -auto-approve -lock-timeout=10m
+
+      - uses: azure/setup-kubectl@v4
+      - uses: azure/setup-helm@v4
+
+      - name: Bootstrap ArgoCD + app-of-apps
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+          kubectl wait --for=condition=Ready nodes --all --timeout=10m
+
+          # Only the tainted system node group exists until ArgoCD installs
+          # Karpenter, so the bootstrap ArgoCD must tolerate CriticalAddonsOnly.
+          # ArgoCD then adopts this release (gitops/envs/dev/apps/platform.yaml).
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm upgrade --install argocd argo/argo-cd \
+            --namespace argocd --create-namespace \
+            --version "$ARGOCD_CHART_VERSION" \
+            --set 'global.tolerations[0].key=CriticalAddonsOnly' \
+            --set 'global.tolerations[0].operator=Exists' \
+            --set 'configs.params.server\.insecure=true' \
+            --set 'global.domain=argocd.dev.ganga888.in' \
+            --wait --timeout 10m
+
+          kubectl apply -n argocd -f gitops/bootstrap/dev-root.yaml
+
+      - name: Summary
+        run: |
+          echo "Dev recreated at $(TZ=Asia/Kolkata date '+%F %R IST'); ArgoCD is syncing gitops/envs/dev." >> "$GITHUB_STEP_SUMMARY"
+          terraform -chdir="$TF_DIR" output -json | jq '{cluster_name, irsa_role_arns, alb_certificate_arn, waf_regional_acl_arn}' >> "$GITHUB_STEP_SUMMARY" || true

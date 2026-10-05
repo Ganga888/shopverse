@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ShopVerse</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <a href="#/" class="brand">ShopVerse</a>
+      <form id="search-form" class="search" role="search">
+        <input id="search-input" type="search" placeholder="Search products" aria-label="Search products" />
+      </form>
+      <nav>
+        <a href="#/">Products</a>
+        <a href="#/cart">Cart <span id="cart-count" class="pill">0</span></a>
+        <a href="#/orders">Orders</a>
+        <a href="#/login" id="auth-link">Sign in</a>
+      </nav>
+    </header>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <main id="app"></main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

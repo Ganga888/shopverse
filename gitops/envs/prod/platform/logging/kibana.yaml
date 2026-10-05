@@ -1,0 +1,42 @@
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: shopverse
+  namespace: logging
+spec:
+  version: 8.17.4
+  count: 2
+  elasticsearchRef:
+    name: shopverse
+  config:
+    server.publicBaseUrl: https://kibana.ganga888.in
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: true          # TLS terminates at the ALB; nginx -> kibana is in-cluster HTTP
+  podTemplate:
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            requests: { cpu: 200m, memory: 1Gi }
+            limits: { memory: 1Gi }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kibana
+  namespace: logging
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kibana.ganga888.in
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shopverse-kb-http
+                port:
+                  number: 5601

@@ -1,0 +1,26 @@
+#!/bin/bash
+# First-boot preparation only. Everything else (Docker, the Jenkins stack, hardening,
+# node_exporter, CloudWatch agent) is applied by Ansible over SSM:
+#   ansible-playbook -i inventories/ci/hosts.yml playbooks/jenkins.yml
+set -euo pipefail
+
+# 1. Mount the encrypted data volume at /var/lib/docker (Jenkins home + SonarQube live in Docker volumes).
+VOL_ID="${data_volume_id}"
+DEV="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$${VOL_ID//-/}"
+for _ in $(seq 1 60); do [ -e "$DEV" ] && break; sleep 5; done   # the attachment can land after boot
+if [ -e "$DEV" ]; then
+  if ! blkid "$DEV" >/dev/null 2>&1; then mkfs.ext4 -L jenkins-data "$DEV"; fi
+  mkdir -p /var/lib/docker
+  grep -q 'LABEL=jenkins-data' /etc/fstab || echo 'LABEL=jenkins-data /var/lib/docker ext4 defaults,nofail,noatime 0 2' >> /etc/fstab
+  mount -a
+fi
+
+# 2. Kernel settings SonarQube's embedded Elasticsearch needs.
+cat > /etc/sysctl.d/90-sonarqube.conf <<SYSCTL
+vm.max_map_count=524288
+fs.file-max=131072
+SYSCTL
+sysctl --system
+
+# 3. SSM agent ships with Ubuntu AMIs as a snap; make sure it is running for Session Manager / Ansible.
+snap start amazon-ssm-agent 2>/dev/null || systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true

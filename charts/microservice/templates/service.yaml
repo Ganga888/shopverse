@@ -1,0 +1,62 @@
+{{- $name := include "microservice.name" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "microservice.workloadSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- if .Values.rollout.enabled }}
+---
+# Canary service: selector is rewritten by Argo Rollouts to the canary ReplicaSet hash.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-canary
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+    shopverse.io/service-role: canary
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "microservice.workloadSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+{{- end }}
+{{- if .Values.metrics.enabled }}
+---
+# Headless metrics service selecting ALL serving pods (stable + canary). Argo Rollouts
+# rewrites the selectors of the stable/canary services, so Prometheus scrapes via this one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-metrics
+  labels:
+    {{- include "microservice.labels" . | nindent 4 }}
+    shopverse.io/service-role: metrics
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "microservice.workloadSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: http-metrics
+      port: {{ .Values.containerPort }}
+      targetPort: http
+      protocol: TCP
+{{- end }}

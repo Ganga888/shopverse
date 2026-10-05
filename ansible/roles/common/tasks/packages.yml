@@ -1,0 +1,46 @@
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+
+- name: Remove legacy/insecure packages
+  ansible.builtin.apt:
+    name: "{{ common_removed_packages }}"
+    state: absent
+    purge: true
+
+- name: Login banner
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: "{{ common_login_banner }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - /etc/issue
+    - /etc/issue.net
+
+- name: Ensure journald drop-in dir exists
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: Persistent journald with size cap
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/10-shopverse.conf
+    content: |
+      [Journal]
+      Storage=persistent
+      Compress=yes
+      SystemMaxUse=1G
+      ForwardToSyslog=no
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart journald

@@ -1,0 +1,39 @@
+# Velero schedules (dev). Backups land in s3://shopverse-dev-velero, volumes as EBS snapshots.
+# RPO for business data comes from RDS PITR (prod 5 min) - Velero covers Kubernetes state + PVs.
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-full
+  namespace: velero
+spec:
+  schedule: "0 20 * * *"            # 20:00 UTC = 01:30 IST
+  useOwnerReferencesInBackup: false
+  template:
+    ttl: 720h0m0s                   # 30 days
+    includedNamespaces: ["*"]
+    excludedNamespaces: [velero, kube-node-lease, kube-public]
+    includeClusterResources: true
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations: [default]
+    metadata:
+      labels:
+        shopverse.io/backup-type: daily-full
+---
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: hourly-shop
+  namespace: velero
+spec:
+  schedule: "5 * * * *"
+  useOwnerReferencesInBackup: false
+  template:
+    ttl: 48h0m0s
+    includedNamespaces: [shop]
+    includeClusterResources: false
+    snapshotVolumes: false          # shop is stateless; state lives in RDS/ElastiCache/MSK
+    storageLocation: default
+    metadata:
+      labels:
+        shopverse.io/backup-type: hourly-shop

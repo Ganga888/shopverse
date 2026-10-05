@@ -1,0 +1,55 @@
+# media-service (prod) - values for charts/microservice. Release name == media-service, namespace shop.
+# image.tag is bumped by the promote workflow (.github) - do not edit by hand outside a PR.
+# Datastores, topics, secrets and IRSA follow docs/CONTRACT.md - keep them in sync with the contract.
+global:
+  env: prod
+  domain: ganga888.in
+  awsAccountId: '111122223333'
+  awsRegion: ap-south-1
+image:
+  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/media-service
+  tag: bootstrap
+replicaCount: 3
+logLevel: info
+nodeEnv: production
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+ingress:
+  enabled: true
+  path: /api/v1/media
+serviceAccount:
+  irsa:
+    enabled: true
+    roleArn: arn:aws:iam::111122223333:role/shopverse-prod-media-service
+env:
+  NODE_OPTIONS: --max-old-space-size=384
+  S3_BUCKET: shopverse-prod-media
+  CDN_BASE_URL: https://cdn.ganga888.in
+  PRESIGNED_URL_TTL_SECONDS: '900'
+externalSecrets:
+  enabled: false
+  items: []
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 70
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+topologySpread:
+  zoneWhenUnsatisfiable: DoNotSchedule
+prometheusRule:
+  severity: critical
+networkPolicy:
+  callers: []
+  egressToServices: []
+  egress:
+    postgres: false
+    redis: false
+    kafka: false
