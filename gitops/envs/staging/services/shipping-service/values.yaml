@@ -5,10 +5,10 @@
 global:
   env: staging
   domain: staging.ganga888.in
-  awsAccountId: '111122223333'
+  awsAccountId: '786896018375'
   awsRegion: ap-south-1
 image:
-  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/shipping-service
+  repository: 786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/shipping-service
   tag: bootstrap
 replicaCount: 2
 logLevel: info

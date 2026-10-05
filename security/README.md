@@ -10,7 +10,7 @@
    | 3. docker build (multi-stage, distroless/node:22, uid 10001)
    | 4. Trivy image scan (security/trivy/trivy.yaml)          HIGH/CRITICAL with a fix -> fail
    | 5. SBOM: syft/trivy -> CycloneDX JSON (build artifact)
-   | 6. Push to ECR 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/<svc>:<git-sha>
+   | 6. Push to ECR 786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/<svc>:<git-sha>
    |    (tag immutability on, scan-on-push on)
    | 7. cosign sign --key awskms:///alias/shopverse-cosign <image>@<digest>
    |    cosign attest --type cyclonedx --predicate sbom.json --key awskms:///alias/shopverse-cosign <image>@<digest>
@@ -61,9 +61,9 @@ Scanning of infrastructure code runs in the same pipelines: `checkov` (`checkov/
 ## Verify an image manually
 
 ```bash
-IMG=111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/order-service:<sha>
-cosign verify --key awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign --insecure-ignore-tlog "$IMG"
-cosign verify-attestation --type cyclonedx --key awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign --insecure-ignore-tlog "$IMG" | jq -r .payload | base64 -d | jq '.predicate.components | length'
+IMG=786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/order-service:<sha>
+cosign verify --key awskms:///arn:aws:kms:ap-south-1:786896018375:alias/shopverse-cosign --insecure-ignore-tlog "$IMG"
+cosign verify-attestation --type cyclonedx --key awskms:///arn:aws:kms:ap-south-1:786896018375:alias/shopverse-cosign --insecure-ignore-tlog "$IMG" | jq -r .payload | base64 -d | jq '.predicate.components | length'
 ```
 
 ## Policy reports

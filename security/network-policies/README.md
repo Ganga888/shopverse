@@ -27,6 +27,6 @@ Kafka-driven flows (the saga) need no pod-to-pod rules: services only talk to th
 Test a policy:
 
 ```bash
-kubectl -n shop run np-test --rm -it --image=111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/cart-service:<sha> \
+kubectl -n shop run np-test --rm -it --image=786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/cart-service:<sha> \
   --labels app.kubernetes.io/name=cart-service -- wget -qO- -T 3 http://catalog-service.shop:8080/healthz/ready
 ```

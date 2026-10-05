@@ -14,10 +14,10 @@ metadata:
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
     # tf-output: acm_certificate_arn (covers *.staging.ganga888.in and staging.ganga888.in)
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:111122223333:certificate/00000000-0000-0000-0000-000000000051
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-south-1:786896018375:certificate/00000000-0000-0000-0000-000000000051
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
     # tf-output: waf_regional_acl_arn
-    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:ap-south-1:111122223333:regional/webacl/shopverse-staging-alb/00000000-0000-0000-0000-000000000052
+    alb.ingress.kubernetes.io/wafv2-acl-arn: arn:aws:wafv2:ap-south-1:786896018375:regional/webacl/shopverse-staging-alb/00000000-0000-0000-0000-000000000052
     alb.ingress.kubernetes.io/healthcheck-port: "10254"
     alb.ingress.kubernetes.io/healthcheck-path: /healthz
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"

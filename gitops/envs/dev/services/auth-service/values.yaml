@@ -4,10 +4,10 @@
 global:
   env: dev
   domain: dev.ganga888.in
-  awsAccountId: '111122223333'
+  awsAccountId: '786896018375'
   awsRegion: ap-south-1
 image:
-  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/auth-service
+  repository: 786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/auth-service
   tag: bootstrap
 replicaCount: 2
 logLevel: debug

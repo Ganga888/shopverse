@@ -18,7 +18,7 @@ module "eks" {
   vpc_id                       = module.vpc.vpc_id
   subnet_ids                   = module.vpc.private_subnet_ids
   endpoint_public_access_cidrs = ["203.0.113.0/24"]
-  cluster_admin_role_arns      = ["arn:aws:iam::111122223333:role/shopverse-gha-apply"]
+  cluster_admin_role_arns      = ["arn:aws:iam::786896018375:role/shopverse-gha-apply"]
   ebs_csi_role_arn             = module.irsa.ebs_csi_role_arn
 }
 ```

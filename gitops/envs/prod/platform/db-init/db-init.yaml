@@ -42,9 +42,9 @@ spec:
   target: { name: rds-master, creationPolicy: Owner }
   data:
     - secretKey: PGUSER
-      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:111122223333:secret:rds!db-00000000-0000-0000-0000-000000000000", property: username }  # tf-output: rds_master_secret_arn
+      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:786896018375:secret:rds!db-00000000-0000-0000-0000-000000000000", property: username }  # tf-output: rds_master_secret_arn
     - secretKey: PGPASSWORD
-      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:111122223333:secret:rds!db-00000000-0000-0000-0000-000000000000", property: password }  # tf-output: rds_master_secret_arn
+      remoteRef: { key: "arn:aws:secretsmanager:ap-south-1:786896018375:secret:rds!db-00000000-0000-0000-0000-000000000000", property: password }  # tf-output: rds_master_secret_arn
     - secretKey: PGHOST
       remoteRef: { key: shopverse/prod/rds/auth-service, property: host }
 ---

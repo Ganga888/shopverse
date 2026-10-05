@@ -11,7 +11,7 @@ global:
   # -- Base DNS domain of the environment (dev.ganga888.in, staging.ganga888.in, ganga888.in)
   domain: dev.ganga888.in
   # -- AWS account (placeholder, real value injected via env values)
-  awsAccountId: "111122223333"
+  awsAccountId: "786896018375"
   awsRegion: ap-south-1
   partOf: shopverse
   # -- Base URL for runbook links in alerts

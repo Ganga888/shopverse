@@ -12,7 +12,7 @@ spec:
   goTemplateOptions: ["missingkey=error"]
   generators:
     - git:
-        repoURL: https://github.com/shopverse/aws-microservices.git
+        repoURL: https://github.com/Ganga888/shopverse.git
         revision: main
         directories:
           - path: gitops/envs/staging/services/*
@@ -32,14 +32,14 @@ spec:
     spec:
       project: shopverse
       sources:
-        - repoURL: https://github.com/shopverse/aws-microservices.git
+        - repoURL: https://github.com/Ganga888/shopverse.git
           targetRevision: main
           path: charts/microservice
           helm:
             releaseName: '{{.path.basename}}'
             valueFiles:
               - '$values/{{.path.path}}/values.yaml'
-        - repoURL: https://github.com/shopverse/aws-microservices.git
+        - repoURL: https://github.com/Ganga888/shopverse.git
           targetRevision: main
           ref: values
       destination:

@@ -32,7 +32,7 @@ spec:
               namespaces: [kube-system, kyverno]
       verifyImages:
         - imageReferences:
-            - "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+            - "786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
           failureAction: Enforce
           mutateDigest: true
           verifyDigest: true
@@ -46,7 +46,7 @@ spec:
                 - keys:
                     # Equivalent offline form: `cosign public-key --key awskms:///alias/shopverse-cosign`
                     # and paste the PEM into `publicKeys:` (then Kyverno needs no KMS permission).
-                    kms: awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign
+                    kms: awskms:///arn:aws:kms:ap-south-1:786896018375:alias/shopverse-cosign
                     signatureAlgorithm: sha256
                     rekor:
                       ignoreTlog: true
@@ -77,7 +77,7 @@ spec:
               namespaces: [shop]
       verifyImages:
         - imageReferences:
-            - "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+            - "786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
           failureAction: Audit
           mutateDigest: false
           verifyDigest: false
@@ -89,7 +89,7 @@ spec:
               attestors:
                 - entries:
                     - keys:
-                        kms: awskms:///arn:aws:kms:ap-south-1:111122223333:alias/shopverse-cosign
+                        kms: awskms:///arn:aws:kms:ap-south-1:786896018375:alias/shopverse-cosign
                         rekor: { ignoreTlog: true }
                         ctlog: { ignoreSCT: true }
               conditions:

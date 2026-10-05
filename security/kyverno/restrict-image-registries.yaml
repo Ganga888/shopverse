@@ -25,16 +25,16 @@ spec:
       validate:
         failureAction: Enforce
         message: >-
-          Image registry not allowed. Use 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/* or an
+          Image registry not allowed. Use 786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/* or an
           approved upstream (see security/kyverno/restrict-image-registries.yaml).
         pattern:
           spec:
             =(ephemeralContainers):
-              - image: "111122223333.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
+              - image: "786896018375.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
             =(initContainers):
-              - image: "111122223333.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
+              - image: "786896018375.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
             containers:
-              - image: "111122223333.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
+              - image: "786896018375.dkr.ecr.ap-south-1.amazonaws.com/* | public.ecr.aws/* | registry.k8s.io/* | quay.io/* | ghcr.io/* | reg.kyverno.io/* | docker.elastic.co/* | cr.fluentbit.io/* | gcr.io/kubecost1/* | cr.l5d.io/* | docker.io/bitnamilegacy/* | bitnamilegacy/* | docker.io/grafana/* | grafana/* | otel/* | docker.io/otel/* | jaegertracing/* | docker.io/jaegertracing/* | velero/* | docker.io/velero/* | curlimages/* | docker.io/curlimages/* | danielqsj/* | docker.io/danielqsj/*"
     - name: shop-only-from-ecr
       match:
         any:
@@ -43,10 +43,10 @@ spec:
               namespaces: [shop]
       validate:
         failureAction: Enforce
-        message: "Pods in shop may only run ShopVerse images from ECR (111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*)."
+        message: "Pods in shop may only run ShopVerse images from ECR (786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*)."
         pattern:
           spec:
             =(initContainers):
-              - image: "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+              - image: "786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
             containers:
-              - image: "111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"
+              - image: "786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/*"

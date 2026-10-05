@@ -2,7 +2,7 @@
 #   terraform init -backend=false && terraform test
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
-    defaults = { account_id = "111122223333", arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { account_id = "786896018375", arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
@@ -14,29 +14,29 @@ mock_provider "aws" {
     defaults = { zone_id = "Z0000000000000000000", name = "ganga888.in" }
   }
   mock_data "aws_iam_policy" {
-    defaults = { arn = "arn:aws:iam::111122223333:policy/shopverse-jenkins-ci" }
+    defaults = { arn = "arn:aws:iam::786896018375:policy/shopverse-jenkins-ci" }
   }
   mock_data "aws_ssm_parameter" {
     defaults = { value = "ami-0123456789abcdef0" }
   }
   mock_resource "aws_iam_role" {
-    defaults = { arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_resource "aws_cloudwatch_log_group" {
-    defaults = { arn = "arn:aws:logs:ap-south-1:111122223333:log-group:x" }
+    defaults = { arn = "arn:aws:logs:ap-south-1:786896018375:log-group:x" }
   }
   mock_resource "aws_s3_bucket" {
-    defaults = { arn = "arn:aws:s3:::shopverse-ci-ssm-111122223333" }
+    defaults = { arn = "arn:aws:s3:::shopverse-ci-ssm-786896018375" }
   }
   mock_resource "aws_secretsmanager_secret" {
-    defaults = { arn = "arn:aws:secretsmanager:ap-south-1:111122223333:secret:shopverse/ci/jenkins-abc" }
+    defaults = { arn = "arn:aws:secretsmanager:ap-south-1:786896018375:secret:shopverse/ci/jenkins-abc" }
   }
   mock_resource "aws_instance" {
-    defaults = { arn = "arn:aws:ec2:ap-south-1:111122223333:instance/i-0123456789abcdef0", id = "i-0123456789abcdef0" }
+    defaults = { arn = "arn:aws:ec2:ap-south-1:786896018375:instance/i-0123456789abcdef0", id = "i-0123456789abcdef0" }
   }
   mock_resource "aws_acm_certificate" {
     defaults = {
-      arn = "arn:aws:acm:ap-south-1:111122223333:certificate/abc"
+      arn = "arn:aws:acm:ap-south-1:786896018375:certificate/abc"
       domain_validation_options = [
         { domain_name = "jenkins.ganga888.in", resource_record_name = "_a.jenkins.ganga888.in.", resource_record_type = "CNAME", resource_record_value = "_x.acm-validations.aws." },
         { domain_name = "sonarqube.ganga888.in", resource_record_name = "_b.sonarqube.ganga888.in.", resource_record_type = "CNAME", resource_record_value = "_y.acm-validations.aws." },

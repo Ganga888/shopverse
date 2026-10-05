@@ -95,10 +95,10 @@ ACCOUNT_ID=<ACCOUNT_ID>
 GH=<GH_OWNER>/<GH_REPO>
 
 # 1. AWS account ID
-grep -rl 111122223333 --exclude-dir=.git . | xargs sed -i "s/111122223333/${ACCOUNT_ID}/g"
+grep -rl 786896018375 --exclude-dir=.git . | xargs sed -i "s/786896018375/${ACCOUNT_ID}/g"
 # 2. Repository URL that ArgoCD pulls from
-grep -rl 'https://github.com/shopverse/aws-microservices.git' --exclude-dir=.git . \
-  | xargs sed -i "s#https://github.com/shopverse/aws-microservices.git#https://github.com/${GH}.git#g"
+grep -rl 'https://github.com/Ganga888/shopverse.git' --exclude-dir=.git . \
+  | xargs sed -i "s#https://github.com/Ganga888/shopverse.git#https://github.com/${GH}.git#g"
 # 3. Repository allowed to assume the GitHub OIDC roles
 sed -i "s#OWNER/shopverse#${GH}#g" terraform/global/terraform.tfvars
 
@@ -116,7 +116,7 @@ budget_monthly_limit_usd = 500                       # whole account, USD
 budget_alert_emails      = ["you@yourdomain.com"]
 ```
 
-**Check:** `grep -rn 111122223333 . | wc -l` prints `0`.
+**Check:** `grep -rn 786896018375 . | wc -l` prints `0`.
 
 ---
 

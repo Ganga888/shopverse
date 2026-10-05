@@ -1,5 +1,5 @@
 aws_region: ap-south-1
-aws_account_id: "111122223333"
+aws_account_id: "786896018375"
 jenkins_url: "https://jenkins.ganga888.in"
 jenkins_aws_auth_mode: instance-profile
 jenkins_secret_id: "shopverse/ci/jenkins"

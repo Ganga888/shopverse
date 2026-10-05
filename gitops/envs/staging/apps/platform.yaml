@@ -24,7 +24,7 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: https://github.com/shopverse/aws-microservices.git
+    repoURL: https://github.com/Ganga888/shopverse.git
     targetRevision: main
     path: gitops/envs/staging/platform/base
   destination:
@@ -176,7 +176,7 @@ spec:
           create: true
           name: aws-load-balancer-controller
           annotations:
-            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-aws-load-balancer-controller
+            eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-aws-load-balancer-controller
         enableServiceMutatorWebhook: false
         defaultTags:
           Project: shopverse
@@ -245,7 +245,7 @@ spec:
         serviceAccount:
           name: external-secrets
           annotations:
-            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-external-secrets
+            eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-external-secrets
         serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
         resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 256Mi } }
         webhook:
@@ -285,7 +285,7 @@ spec:
         serviceAccount:
           name: karpenter
           annotations:
-            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-karpenter
+            eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-karpenter
         replicas: 2
         # Runs on the managed system node group (chart default affinity keeps it off Karpenter nodes)
         controller:
@@ -384,7 +384,7 @@ spec:
             passwordKey: admin-password
           serviceAccount:
             annotations:
-              eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-grafana   # CloudWatch (RDS) read
+              eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-grafana   # CloudWatch (RDS) read
           ingress:
             enabled: true
             ingressClassName: nginx
@@ -546,7 +546,7 @@ spec:
         serviceAccount:
           name: external-dns
           annotations:
-            eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-external-dns
+            eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-external-dns
         sources: [ingress]
         domainFilters: [ganga888.in]
         # One hosted zone shared by all envs: ownership via TXT owner id, so each env only touches its records.
@@ -695,7 +695,7 @@ spec:
             serviceAccount:
               annotations:
                 # ECR pull + kms:GetPublicKey for cosign verification (security/kyverno)
-                eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-kyverno
+                eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-kyverno
           container:
             resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 768Mi } }
           serviceMonitor: { enabled: true, additionalLabels: { release: kube-prometheus-stack } }
@@ -750,7 +750,7 @@ spec:
           server:
             name: velero
             annotations:
-              eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/shopverse-staging-velero
+              eks.amazonaws.com/role-arn: arn:aws:iam::786896018375:role/shopverse-staging-velero
         configuration:
           backupStorageLocation:
             - name: default
@@ -805,7 +805,7 @@ metadata:
 spec:
   project: platform
   source:
-    repoURL: https://github.com/shopverse/aws-microservices.git
+    repoURL: https://github.com/Ganga888/shopverse.git
     targetRevision: main
     path: gitops/envs/staging/platform        # kustomization.yaml
   destination:
@@ -1172,7 +1172,7 @@ spec:
           clusterName: shopverse-staging
           currencyCode: USD
           awsSpotDataRegion: ap-south-1
-          projectID: "111122223333"
+          projectID: "786896018375"
           labelMappingConfigs:
             enabled: true
             owner_label: app.kubernetes.io/part-of

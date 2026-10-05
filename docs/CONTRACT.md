@@ -5,7 +5,7 @@ Every part of the repo (Terraform, services, Helm, GitOps, CI, docs) MUST use th
 ## Global
 - Project / app name: `shopverse`  (resource prefix `shopverse-<env>`)
 - AWS region: `ap-south-1` (Mumbai). CloudFront ACM cert + CloudFront WAF live in `us-east-1`.
-- Account ID placeholder: `111122223333` (never hardcode real IDs; use variables / data sources).
+- Account ID placeholder: `786896018375` (never hardcode real IDs; use variables / data sources).
 - Environments: `dev`, `staging`, `prod`. Same Terraform modules + same Helm chart; only tfvars / values differ.
 - Mandatory tags on every AWS resource: `Project=shopverse`, `Environment=<env>`, `Owner=platform-team`, `CostCenter=shopverse`, `ManagedBy=terraform`.
 - Kubernetes app namespace: `shop` (label `pod-security.kubernetes.io/enforce=restricted`).

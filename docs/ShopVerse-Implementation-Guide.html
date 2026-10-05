@@ -217,10 +217,10 @@ git push -u origin main
 GH=&lt;GH_OWNER&gt;/&lt;GH_REPO&gt;
 
 # 1. AWS account ID
-grep -rl 111122223333 --exclude-dir=.git . | xargs sed -i &quot;s/111122223333/${ACCOUNT_ID}/g&quot;
+grep -rl 786896018375 --exclude-dir=.git . | xargs sed -i &quot;s/786896018375/${ACCOUNT_ID}/g&quot;
 # 2. Repository URL that ArgoCD pulls from
-grep -rl 'https://github.com/shopverse/aws-microservices.git' --exclude-dir=.git . \
-  | xargs sed -i &quot;s#https://github.com/shopverse/aws-microservices.git#https://github.com/${GH}.git#g&quot;
+grep -rl 'https://github.com/Ganga888/shopverse.git' --exclude-dir=.git . \
+  | xargs sed -i &quot;s#https://github.com/Ganga888/shopverse.git#https://github.com/${GH}.git#g&quot;
 # 3. Repository allowed to assume the GitHub OIDC roles
 sed -i &quot;s#OWNER/shopverse#${GH}#g&quot; terraform/global/terraform.tfvars
 
@@ -232,7 +232,7 @@ git commit -am &quot;Set account ID and repository&quot; &amp;&amp; git push
 <pre><code class="language-hcl">budget_monthly_limit_usd = 500                       # whole account, USD
 budget_alert_emails      = [&quot;you@yourdomain.com&quot;]
 </code></pre>
-<p><strong>Check:</strong> <code>grep -rn 111122223333 . | wc -l</code> prints <code>0</code>.</p>
+<p><strong>Check:</strong> <code>grep -rn 786896018375 . | wc -l</code> prints <code>0</code>.</p>
 <hr />
 <h2 id="phase-2-bootstrap-terraform-state">Phase 2: Bootstrap Terraform state</h2>
 <p>This is run <strong>once per account</strong> with local state. It creates the S3 bucket <code>shopverse-tfstate-&lt;ACCOUNT_ID&gt;</code> (versioned and KMS-encrypted) and the DynamoDB lock table <code>shopverse-terraform-locks</code>.</p>

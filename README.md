@@ -47,7 +47,7 @@ The full step-by-step walkthrough is in [docs/IMPLEMENTATION.md](docs/IMPLEMENTA
 7. **Verify** — `newman-e2e.yml` against `https://api.dev.ganga888.in`, then `tests/k6/load.js` while watching HPA/Karpenter in Grafana.
 8. **Staging / prod** — same Terraform flow (prod apply needs approval); promote images with `promote.yml`.
 
-Before the first apply, replace the placeholders: account ID `111122223333`, `OWNER/shopverse` repo, and values marked `# tf-output:` in `gitops/` (fill them from `terraform output`).
+Before the first apply, replace the placeholders: account ID `786896018375`, `OWNER/shopverse` repo, and values marked `# tf-output:` in `gitops/` (fill them from `terraform output`).
 
 ## Cost safety
 

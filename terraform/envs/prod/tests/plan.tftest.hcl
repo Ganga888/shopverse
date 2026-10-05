@@ -12,7 +12,7 @@ mock_provider "aws" {
     defaults = { name = "ap-south-1", id = "ap-south-1" }
   }
   mock_data "aws_caller_identity" {
-    defaults = { account_id = "111122223333", arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { account_id = "786896018375", arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_data "aws_partition" {
     defaults = { partition = "aws", dns_suffix = "amazonaws.com" }
@@ -21,7 +21,7 @@ mock_provider "aws" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
   mock_data "aws_iam_session_context" {
-    defaults = { issuer_arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { issuer_arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_data "aws_route53_zone" {
     defaults = { zone_id = "Z123", arn = "arn:aws:route53:::hostedzone/Z123", name = "ganga888.in" }
@@ -33,7 +33,7 @@ mock_provider "aws" {
 mock_provider "aws" {
   alias = "us_east_1"
   mock_data "aws_acm_certificate" {
-    defaults = { arn = "arn:aws:acm:us-east-1:111122223333:certificate/abc" }
+    defaults = { arn = "arn:aws:acm:us-east-1:786896018375:certificate/abc" }
   }
 }
 mock_provider "aws" {

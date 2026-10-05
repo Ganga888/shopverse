@@ -11,7 +11,7 @@ metadata:
 spec:
   description: Cluster add-ons and platform configuration (prod)
   sourceRepos:
-    - https://github.com/shopverse/aws-microservices.git
+    - https://github.com/Ganga888/shopverse.git
     - https://argoproj.github.io/argo-helm
     - https://aws.github.io/eks-charts
     - https://kubernetes-sigs.github.io/metrics-server/
@@ -50,7 +50,7 @@ metadata:
 spec:
   description: ShopVerse microservices (prod) - namespace shop only, no cluster-scoped resources
   sourceRepos:
-    - https://github.com/shopverse/aws-microservices.git
+    - https://github.com/Ganga888/shopverse.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: shop
@@ -86,7 +86,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/shopverse/aws-microservices.git
+    repoURL: https://github.com/Ganga888/shopverse.git
     targetRevision: main
     path: gitops/envs/prod/apps
     directory:

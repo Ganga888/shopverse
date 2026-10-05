@@ -47,7 +47,7 @@ Edit each copy:
 
 ```yaml
 image:
-  repository: 111122223333.dkr.ecr.ap-south-1.amazonaws.com/shopverse/wishlist-service
+  repository: 786896018375.dkr.ecr.ap-south-1.amazonaws.com/shopverse/wishlist-service
   tag: bootstrap                      # first real tag arrives via the promote workflow
 ingress:
   enabled: true

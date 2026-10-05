@@ -6,7 +6,7 @@ mock_provider "aws" {
     defaults = { name = "ap-south-1", id = "ap-south-1" }
   }
   mock_data "aws_caller_identity" {
-    defaults = { account_id = "111122223333", arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { account_id = "786896018375", arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
@@ -15,19 +15,19 @@ mock_provider "aws" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
   mock_resource "aws_iam_openid_connect_provider" {
-    defaults = { arn = "arn:aws:iam::111122223333:oidc-provider/token.actions.githubusercontent.com" }
+    defaults = { arn = "arn:aws:iam::786896018375:oidc-provider/token.actions.githubusercontent.com" }
   }
   mock_resource "aws_iam_user" {
-    defaults = { arn = "arn:aws:iam::111122223333:user/ci/jenkins-ci" }
+    defaults = { arn = "arn:aws:iam::786896018375:user/ci/jenkins-ci" }
   }
   mock_resource "aws_iam_role" {
-    defaults = { arn = "arn:aws:iam::111122223333:role/x" }
+    defaults = { arn = "arn:aws:iam::786896018375:role/x" }
   }
   mock_resource "aws_kms_key" {
-    defaults = { arn = "arn:aws:kms:ap-south-1:111122223333:key/abc" }
+    defaults = { arn = "arn:aws:kms:ap-south-1:786896018375:key/abc" }
   }
   mock_resource "aws_sns_topic" {
-    defaults = { arn = "arn:aws:sns:ap-south-1:111122223333:t" }
+    defaults = { arn = "arn:aws:sns:ap-south-1:786896018375:t" }
   }
 }
 mock_provider "aws" {

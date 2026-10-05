@@ -16,7 +16,7 @@ jenkins_secret_id: "shopverse/ci/jenkins"
 jenkins_aws_auth_mode: instance-profile
 github_owner: "OWNER"
 github_repo: "shopverse"
-jenkins_ecr_registry: "{{ aws_account_id | default('111122223333') }}.dkr.ecr.{{ aws_region | default('ap-south-1') }}.amazonaws.com"
+jenkins_ecr_registry: "{{ aws_account_id | default('786896018375') }}.dkr.ecr.{{ aws_region | default('ap-south-1') }}.amazonaws.com"
 jenkins_cosign_key_ref: "awskms:///alias/shopverse-cosign"
 
 # Optional tar backup of a bind-mounted JENKINS_HOME to S3; "" disables. On EC2 the whole data volume
@@ -30,7 +30,7 @@ jenkins_backup_hour: "21"         # 21:00 UTC = 02:30 IST
 jenkins_env:
   JENKINS_URL: "{{ jenkins_url }}/"
   AWS_REGION: "{{ aws_region | default('ap-south-1') }}"
-  AWS_ACCOUNT_ID: "{{ aws_account_id | default('111122223333') }}"
+  AWS_ACCOUNT_ID: "{{ aws_account_id | default('786896018375') }}"
   AWS_AUTH_MODE: "{{ jenkins_aws_auth_mode }}"
   GITHUB_OWNER: "{{ github_owner }}"
   GITHUB_REPO: "{{ github_repo }}"
