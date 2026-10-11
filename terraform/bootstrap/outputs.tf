@@ -18,7 +18,7 @@ output "backend_hcl" {
   value       = <<-EOT
     bucket         = "${aws_s3_bucket.state.id}"
     region         = "${var.region}"
-    dynamodb_table = "${aws_dynamodb_table.locks.name}"
+    use_lockfile   = true
     encrypt        = true
     kms_key_id     = "${aws_kms_key.state.arn}"
   EOT

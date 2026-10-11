@@ -1,0 +1,2 @@
+terraform/bootstrap/.terraform.lock.hcl
+terraform/global/.terraform.lock.hcl

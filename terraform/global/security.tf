@@ -219,36 +219,48 @@ resource "aws_cloudtrail" "main" {
 ################################################################################
 
 resource "aws_guardduty_detector" "this" {
+  count = var.enable_guardduty ? 1 : 0
+
   enable                       = true
   finding_publishing_frequency = "FIFTEEN_MINUTES"
 }
 
 resource "aws_guardduty_detector_feature" "s3" {
-  detector_id = aws_guardduty_detector.this.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.this[0].id
   name        = "S3_DATA_EVENTS"
   status      = "ENABLED"
 }
 
 resource "aws_guardduty_detector_feature" "eks_audit" {
-  detector_id = aws_guardduty_detector.this.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.this[0].id
   name        = "EKS_AUDIT_LOGS"
   status      = "ENABLED"
 }
 
 resource "aws_guardduty_detector_feature" "ebs_malware" {
-  detector_id = aws_guardduty_detector.this.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.this[0].id
   name        = "EBS_MALWARE_PROTECTION"
   status      = "ENABLED"
 }
 
 resource "aws_guardduty_detector_feature" "rds_login" {
-  detector_id = aws_guardduty_detector.this.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.this[0].id
   name        = "RDS_LOGIN_EVENTS"
   status      = "ENABLED"
 }
 
 resource "aws_guardduty_detector_feature" "runtime" {
-  detector_id = aws_guardduty_detector.this.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.this[0].id
   name        = "RUNTIME_MONITORING"
   status      = var.enable_guardduty_runtime_monitoring ? "ENABLED" : "DISABLED"
 
@@ -263,23 +275,82 @@ resource "aws_guardduty_detector_feature" "runtime" {
 ################################################################################
 
 resource "aws_securityhub_account" "this" {
+  count = var.enable_securityhub ? 1 : 0
+
   enable_default_standards  = false
   control_finding_generator = "SECURITY_CONTROL"
   auto_enable_controls      = true
 }
 
 resource "aws_securityhub_standards_subscription" "fsbp" {
+  count = var.enable_securityhub ? 1 : 0
+
   standards_arn = "arn:${local.partition}:securityhub:${local.region}::standards/aws-foundational-security-best-practices/v/1.0.0"
   depends_on    = [aws_securityhub_account.this]
 }
 
 resource "aws_securityhub_standards_subscription" "cis" {
+  count = var.enable_securityhub ? 1 : 0
+
   standards_arn = "arn:${local.partition}:securityhub:${local.region}::standards/cis-aws-foundations-benchmark/v/3.0.0"
   depends_on    = [aws_securityhub_account.this]
 }
 
 # Pull GuardDuty findings into Security Hub.
 resource "aws_securityhub_product_subscription" "guardduty" {
+  count = var.enable_securityhub ? 1 : 0
+
   product_arn = "arn:${local.partition}:securityhub:${local.region}::product/aws/guardduty"
   depends_on  = [aws_securityhub_account.this]
+}
+
+# Keeps state from before these resources became optional (count) in place.
+moved {
+  from = aws_guardduty_detector.this
+  to   = aws_guardduty_detector.this[0]
+}
+
+moved {
+  from = aws_guardduty_detector_feature.s3
+  to   = aws_guardduty_detector_feature.s3[0]
+}
+
+moved {
+  from = aws_guardduty_detector_feature.eks_audit
+  to   = aws_guardduty_detector_feature.eks_audit[0]
+}
+
+moved {
+  from = aws_guardduty_detector_feature.ebs_malware
+  to   = aws_guardduty_detector_feature.ebs_malware[0]
+}
+
+moved {
+  from = aws_guardduty_detector_feature.rds_login
+  to   = aws_guardduty_detector_feature.rds_login[0]
+}
+
+moved {
+  from = aws_guardduty_detector_feature.runtime
+  to   = aws_guardduty_detector_feature.runtime[0]
+}
+
+moved {
+  from = aws_securityhub_account.this
+  to   = aws_securityhub_account.this[0]
+}
+
+moved {
+  from = aws_securityhub_standards_subscription.fsbp
+  to   = aws_securityhub_standards_subscription.fsbp[0]
+}
+
+moved {
+  from = aws_securityhub_standards_subscription.cis
+  to   = aws_securityhub_standards_subscription.cis[0]
+}
+
+moved {
+  from = aws_securityhub_product_subscription.guardduty
+  to   = aws_securityhub_product_subscription.guardduty[0]
 }

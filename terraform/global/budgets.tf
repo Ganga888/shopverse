@@ -147,15 +147,19 @@ resource "aws_budgets_budget" "env" {
 }
 
 resource "aws_ce_anomaly_monitor" "services" {
+  count = var.create_cost_anomaly_monitor ? 1 : 0
+
   name              = "${var.project}-service-monitor"
   monitor_type      = "DIMENSIONAL"
   monitor_dimension = "SERVICE"
 }
 
 resource "aws_ce_anomaly_subscription" "services" {
+  count = var.create_cost_anomaly_monitor || var.cost_anomaly_monitor_arn != "" ? 1 : 0
+
   name             = "${var.project}-anomaly-alerts"
   frequency        = "IMMEDIATE"
-  monitor_arn_list = [aws_ce_anomaly_monitor.services.arn]
+  monitor_arn_list = [var.create_cost_anomaly_monitor ? aws_ce_anomaly_monitor.services[0].arn : var.cost_anomaly_monitor_arn]
 
   subscriber {
     type    = "SNS"
@@ -171,4 +175,14 @@ resource "aws_ce_anomaly_subscription" "services" {
   }
 
   depends_on = [aws_sns_topic_policy.billing_alerts]
+}
+
+moved {
+  from = aws_ce_anomaly_monitor.services
+  to   = aws_ce_anomaly_monitor.services[0]
+}
+
+moved {
+  from = aws_ce_anomaly_subscription.services
+  to   = aws_ce_anomaly_subscription.services[0]
 }

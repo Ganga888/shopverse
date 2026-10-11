@@ -4,7 +4,7 @@ This directory holds all AWS infrastructure for ShopVerse. It is region `ap-sout
 
 ```
 terraform/
-├── backend.hcl        shared partial S3 backend config (bucket/lock table/KMS)
+├── backend.hcl        shared partial S3 backend config (bucket, S3 lock file, KMS)
 ├── bootstrap/         S3 state bucket + DynamoDB lock table (local state, run once)
 ├── global/            account-wide: Route 53 zone, ECR x15, GitHub OIDC + CI roles,
 │                      cosign KMS key + jenkins-ci policy, CloudTrail, GuardDuty,
@@ -20,7 +20,7 @@ terraform/
 
 | # | Stack | State | What it does |
 |---|---|---|---|
-| 1 | `bootstrap/` | local | Creates the state bucket `shopverse-tfstate-<account>` (versioned, SSE-KMS, public access blocked, TLS-only) and the lock table `shopverse-terraform-locks`. |
+| 1 | `bootstrap/` | local | Creates the state bucket `shopverse-tfstate-<account>` (versioned, SSE-KMS, public access blocked, TLS-only) and a legacy lock table `shopverse-terraform-locks` (locking itself uses S3 lock files, `use_lockfile = true`). |
 | 2 | `global/` | `global/terraform.tfstate` | Creates the shared account resources. **After the first apply, copy `route53_name_servers` to the registrar of ganga888.in.** The CloudFront certificate only validates once DNS is delegated. |
 | 3 | `ci/` | `ci/terraform.tfstate` | Jenkins + SonarQube on EC2 (needs `admin_cidrs`; see `ci/jenkins/README.md`). |
 | 3 | `envs/dev/` | `envs/dev/terraform.tfstate` | Dev environment (in-cluster data stores). |
@@ -81,7 +81,7 @@ Rough on-demand prices in ap-south-1, per month:
 
 - Dev runs `use_managed_data = false`, which removes about $300+/month of managed data services.
 - The nightly destroy (below) cuts dev compute by about 50%. On weekends the morning recreate is skipped.
-- Budgets (`global/budgets.tf`) alert at 50/80/100% actual and 100% forecast. Per-env budgets filter on the `Environment` cost allocation tag, which you must activate once in Billing → Cost allocation tags. Cost Anomaly Detection emails on anomalies of $25 or more.
+- Budgets (`global/budgets.tf`) alert at 50/80/100% actual and 100% forecast. Per-env budgets filter on the `Environment` cost allocation tag, which you must activate once in Billing → Cost allocation tags. Cost Anomaly Detection emails on anomalies of $25 or more. GuardDuty, Security Hub and the anomaly monitor are behind `enable_guardduty`, `enable_securityhub` and `create_cost_anomaly_monitor` / `cost_anomaly_monitor_arn`, because new or free-plan accounts reject the first two and AWS allows only one SERVICE anomaly monitor per account.
 - An S3 gateway endpoint keeps ECR/S3 traffic off the NAT gateways.
 
 ## Nightly dev destroy (`.github/workflows/nightly-dev.yml`)

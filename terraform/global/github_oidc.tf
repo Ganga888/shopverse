@@ -97,11 +97,11 @@ data "aws_iam_policy_document" "gha_plan_extra" {
     resources = ["arn:${local.partition}:s3:::${local.state_bucket}", "arn:${local.partition}:s3:::${local.state_bucket}/*"]
   }
 
-  # plan acquires (and releases) the state lock
+  # plan acquires (and releases) the state lock: an S3 <key>.tflock object (use_lockfile)
   statement {
     sid       = "StateLock"
-    actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:DescribeTable"]
-    resources = ["arn:${local.partition}:dynamodb:${local.region}:${local.account_id}:table/${var.lock_table_name}"]
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:${local.partition}:s3:::${local.state_bucket}/*.tflock"]
   }
 
   statement {

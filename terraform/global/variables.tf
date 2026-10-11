@@ -92,6 +92,30 @@ variable "cloudtrail_retention_days" {
   default     = 365
 }
 
+variable "enable_guardduty" {
+  description = "Create the GuardDuty detector. Needs an account on the AWS paid plan; brand-new or free-plan accounts get SubscriptionRequiredException."
+  type        = bool
+  default     = true
+}
+
+variable "enable_securityhub" {
+  description = "Enable Security Hub with the FSBP and CIS standards. Same paid-plan requirement as GuardDuty."
+  type        = bool
+  default     = true
+}
+
+variable "create_cost_anomaly_monitor" {
+  description = "Create a SERVICE cost anomaly monitor. AWS allows one per account and creates a default one for new accounts; set false and pass cost_anomaly_monitor_arn to reuse it."
+  type        = bool
+  default     = true
+}
+
+variable "cost_anomaly_monitor_arn" {
+  description = "ARN of an existing cost anomaly monitor to subscribe the billing alerts to when create_cost_anomaly_monitor = false. Empty skips the subscription."
+  type        = string
+  default     = ""
+}
+
 variable "enable_guardduty_runtime_monitoring" {
   description = "Enable GuardDuty EKS runtime monitoring (agent managed as an EKS add-on by GuardDuty)."
   type        = bool
